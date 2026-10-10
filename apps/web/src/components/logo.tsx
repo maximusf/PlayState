@@ -18,7 +18,7 @@ export function Logo() {
   return (
     <span className="flex items-center gap-2">
       <LogoMark className="size-7" />
-      <span className="font-pixel text-2xl leading-none text-forest">PlayState</span>
+      <span className="font-pixel text-[2.125rem] leading-none text-forest">PlayState</span>
     </span>
   );
 }

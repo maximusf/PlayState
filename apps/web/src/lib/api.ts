@@ -12,11 +12,18 @@ export type GameSearchResult = {
   coverUrl: string | null;
   genres: string[];
   releaseYear: number | null;
+  releaseDate: string | null;
+  rating: number | null;
+  ratingCount: number;
 };
+
+export type SessionLength = "SHORT" | "MEDIUM" | "LONG";
 
 export type LibraryEntry = {
   id: string;
   addedAt: string;
+  sessionLength: SessionLength | null;
+  pickedFor: string[];
   game: {
     igdbId: number;
     title: string;
@@ -25,7 +32,13 @@ export type LibraryEntry = {
     themes: string[];
     gameModes: string[];
     releaseDate: string | null;
+    timeToBeatHours: number | null;
   };
+};
+
+export type LibraryEntryDetail = LibraryEntry & {
+  summary: string | null;
+  pickerChoices: string[];
 };
 
 export type Recommendation = {
@@ -58,11 +71,8 @@ export function useApi() {
 
   return useCallback(
     async <T,>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> => {
-      let response: Response;
-
-      try {
-        const token = await getToken();
-        response = await fetch(`${API_URL}${path}`, {
+      const send = (token: string | null) =>
+        fetch(`${API_URL}${path}`, {
           method: init.method ?? "GET",
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -70,6 +80,18 @@ export function useApi() {
           },
           body: init.body === undefined ? undefined : JSON.stringify(init.body),
         });
+
+      let response: Response;
+
+      try {
+        response = await send(await getToken());
+
+        // Right after sign-up the session token can be missing or not yet accepted.
+        // Wait briefly, ask Clerk for a fresh token, and try once more.
+        if (response.status === 401) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          response = await send(await getToken({ skipCache: true }));
+        }
       } catch {
         throw new ApiError(0, "NETWORK_ERROR", NETWORK_MESSAGE);
       }

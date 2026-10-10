@@ -11,7 +11,7 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b-4 border-forest bg-surface">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <Link href="/" aria-label="PlayState home">
           <Logo />
         </Link>

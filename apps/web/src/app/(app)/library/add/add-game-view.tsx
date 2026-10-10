@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiError, errorMessage, useApi, type GameSearchResult } from "@/lib/api";
+import { genreLine } from "@/lib/genres";
 import { GameCover, Notice, PixelLoader } from "@/components/ui";
 
 type SearchState =
@@ -12,6 +13,48 @@ type SearchState =
   | { status: "error"; message: string }
   | { status: "results"; term: string; games: GameSearchResult[] };
 
+// Fewest ratings a game needs before its score is treated as reliable.
+const MIN_RATINGS = 10;
+
+function isTrusted(game: GameSearchResult): boolean {
+  return game.rating !== null && game.ratingCount >= MIN_RATINGS;
+}
+
+// Sorting happens in the browser, on the results IGDB already returned.
+// Games missing the sorted value always go last.
+const SORTS = {
+  rating: {
+    label: "Highest rated",
+    // A score from a handful of ratings is not reliable, so those games rank
+    // below every game with enough ratings, whatever their score.
+    compare: (a: GameSearchResult, b: GameSearchResult) =>
+      Number(isTrusted(b)) - Number(isTrusted(a)) ||
+      (b.rating ?? -1) - (a.rating ?? -1) ||
+      b.ratingCount - a.ratingCount,
+  },
+  popular: {
+    label: "Most rated",
+    compare: (a: GameSearchResult, b: GameSearchResult) => b.ratingCount - a.ratingCount,
+  },
+  relevance: { label: "Closest title match", compare: null },
+  newest: {
+    label: "Newest",
+    compare: (a: GameSearchResult, b: GameSearchResult) =>
+      (b.releaseDate ?? "").localeCompare(a.releaseDate ?? ""),
+  },
+  oldest: {
+    label: "Oldest",
+    compare: (a: GameSearchResult, b: GameSearchResult) =>
+      (a.releaseDate ?? "9999").localeCompare(b.releaseDate ?? "9999"),
+  },
+  title: {
+    label: "Title A to Z",
+    compare: (a: GameSearchResult, b: GameSearchResult) => a.title.localeCompare(b.title),
+  },
+} as const;
+
+type SortKey = keyof typeof SORTS;
+
 // Per-row outcome of pressing Add.
 type AddState = "adding" | "added" | "duplicate" | { error: string };
 
@@ -20,6 +63,14 @@ export function AddGameView() {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [added, setAdded] = useState<Record<number, AddState>>({});
+  const [sort, setSort] = useState<SortKey>("rating");
+
+  const results = useMemo(() => {
+    if (search.status !== "results") return [];
+    const { compare } = SORTS[sort];
+    // Array sort is stable, so ties keep IGDB's best-match order.
+    return compare ? [...search.games].sort(compare) : search.games;
+  }, [search, sort]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -65,7 +116,7 @@ export function AddGameView() {
       >
         Back to your library
       </Link>
-      <h1 className="mt-2 font-pixel text-3xl text-forest">Add a game</h1>
+      <h1 className="mt-2 font-pixel text-6xl leading-[0.9] text-forest">Add a game</h1>
 
       <form onSubmit={onSubmit} role="search" className="mt-6 px-1">
         <label htmlFor="game-search" className="pixel-label text-muted">
@@ -106,9 +157,29 @@ export function AddGameView() {
           </Notice>
         )}
 
+        {search.status === "results" && search.games.length > 1 && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-muted">{search.games.length} games found</p>
+            <label className="flex items-center gap-3">
+              <span className="pixel-label text-muted">Sort by</span>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as SortKey)}
+                className="min-h-11 cursor-pointer bg-surface px-3 font-semibold text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
+              >
+                {Object.entries(SORTS).map(([key, option]) => (
+                  <option key={key} value={key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
         {search.status === "results" && search.games.length > 0 && (
           <ul className="space-y-5 px-1">
-            {search.games.map((game) => {
+            {results.map((game) => {
               const state = added[game.igdbId];
               const done = state === "added" || state === "duplicate";
 
@@ -127,7 +198,12 @@ export function AddGameView() {
                       )}
                     </h2>
                     <p className="truncate text-sm text-muted">
-                      {game.genres.slice(0, 3).join(", ") || "No genre listed"}
+                      {genreLine(game.genres, 3)}
+                      {game.rating !== null && (
+                        <span>
+                          {" | "}Rated {game.rating} of 100
+                        </span>
+                      )}
                     </p>
                     {state === "duplicate" && (
                       <p role="status" className="mt-1 text-sm font-semibold text-forest">

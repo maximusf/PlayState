@@ -26,7 +26,7 @@ export function Notice({
     <div
       role={isError ? "alert" : "status"}
       className={`border-l-4 px-4 py-3 ${
-        isError ? "border-danger bg-surface text-danger" : "border-emerald bg-sage text-forest"
+        isError ? "border-danger bg-surface text-danger" : "border-emerald bg-surface text-forest"
       }`}
     >
       {children}
@@ -45,7 +45,7 @@ export function GameCover({
   className?: string;
 }) {
   return (
-    <div className={`relative aspect-[3/4] overflow-hidden bg-sage ${className}`}>
+    <div className={`relative aspect-[3/4] overflow-hidden bg-fern/50 ${className}`}>
       {coverUrl ? (
         <Image
           src={coverUrl}
@@ -102,7 +102,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center gap-4 bg-surface px-6 py-12 text-center pixel-frame">
       <EmptyArt />
-      <h2 className="font-pixel text-2xl text-forest">{title}</h2>
+      <h2 className="font-pixel text-4xl leading-none text-forest">{title}</h2>
       <p className="max-w-sm text-muted">{children}</p>
       {action}
     </div>

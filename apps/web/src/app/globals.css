@@ -2,15 +2,17 @@
 
 /* PlayState design tokens. See DESIGN.md. */
 @theme inline {
-  --color-paper: #fafbf8;
-  --color-surface: #ffffff;
+  --color-paper: #d9ead7;
+  --color-surface: #fafbf8;
   --color-sage: #d9ead7;
+  --color-fern: #8fb58c;
+  --color-pine: #065f46;
   --color-mint: #a7f3d0;
   --color-emerald: #10b981;
   --color-leaf: #22c55e;
   --color-forest: #0f2d23;
   --color-slate: #1f2937;
-  --color-muted: #4b5b55;
+  --color-muted: #3f4d47;
   --color-danger: #b42318;
 
   --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
@@ -73,8 +75,9 @@
 
 @utility pixel-label {
   font-family: var(--font-pixel);
-  font-size: 0.8125rem;
-  letter-spacing: 0.08em;
+  font-size: 1.1875rem;
+  line-height: 1;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -89,6 +92,13 @@
     font-weight: 600;
     color: var(--color-forest);
     cursor: pointer;
+  }
+
+  .btn-lg {
+    min-height: 3.25rem;
+    padding: 0.5rem 1.75rem;
+    font-size: 1.125rem;
+    font-weight: 700;
   }
 
   .btn:disabled {
@@ -129,7 +139,7 @@
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background: var(--color-sage);
+    background: var(--color-mint);
   }
 }
 
