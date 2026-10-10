@@ -1,27 +1,40 @@
 {
   "name": "api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "PlayState REST API",
+  "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
+    "build": "prisma generate && tsc",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
+    "@clerk/express": "^2.1.77",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
+    "@types/supertest": "^7.2.1",
+    "prisma": "^7.10.0",
+    "supertest": "^7.3.1",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
-  }
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "private": true
 }

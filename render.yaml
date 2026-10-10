@@ -1,0 +1,27 @@
+# Render Blueprint for the PlayState API (apps/api).
+# The build runs from the repository root because npm workspaces share one lockfile.
+services:
+  - type: web
+    name: playstate-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build -w apps/api && npm run db:deploy -w apps/api
+    startCommand: npm run start -w apps/api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: FRONTEND_URL
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false

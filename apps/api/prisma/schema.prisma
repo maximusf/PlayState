@@ -1,0 +1,41 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Shared game metadata, cached from IGDB the first time any user adds the game.
+model Game {
+  id          String    @id @default(cuid())
+  igdbId      Int       @unique
+  title       String
+  coverUrl    String?
+  releaseDate DateTime?
+
+  genres    String[]
+  themes    String[]
+  gameModes String[]
+
+  userGames UserGame[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One row per game in a user's library. userId is the Clerk user ID.
+model UserGame {
+  id     String @id @default(cuid())
+  userId String
+  gameId String
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, gameId])
+  @@index([userId])
+}
