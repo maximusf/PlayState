@@ -35,6 +35,11 @@ export const RecommendationSchema = z.object({
     })
     .max(GAME_PREFERENCES.length, "Too many genres."),
   gameMode: z.enum(GAME_MODES, { error: "gameMode is not a supported value." }),
+  // Library entries already shown, so "Pick again" can offer different games.
+  exclude: z
+    .array(z.string().min(1).max(64), { error: "exclude must be a list." })
+    .max(500, "Too many excluded games.")
+    .optional(),
 });
 
 export type RecommendationInput = z.infer<typeof RecommendationSchema>;

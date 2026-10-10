@@ -9,8 +9,15 @@ vi.mock("@clerk/express", () => ({
 }));
 
 const db = vi.hoisted(() => ({
-  userGame: { findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-  game: { upsert: vi.fn() },
+  userGame: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    updateMany: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  game: { upsert: vi.fn(), update: vi.fn() },
+  pick: { create: vi.fn() },
 }));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
@@ -42,6 +49,7 @@ const hadesRow = {
   genres: ["Role-playing (RPG)"],
   themes: ["Action"],
   gameModes: ["Single player"],
+  timeToBeatHours: null as number | null,
 };
 
 const hadesEntry = {
@@ -49,6 +57,8 @@ const hadesEntry = {
   userId: "user_a",
   gameId: "game_1",
   createdAt: new Date("2026-10-08"),
+  sessionLength: null as string | null,
+  picks: [] as { availableTime: string }[],
   game: hadesRow,
 };
 
@@ -98,6 +108,8 @@ describe("GET /api/catalog/search", () => {
           cover: { image_id: "abc" },
           genres: [{ name: "Role-playing (RPG)" }],
           first_release_date: 1600300800,
+          total_rating: 92.6,
+          total_rating_count: 2100,
         },
         { id: 2, name: "No Metadata" },
       ]),
@@ -113,8 +125,20 @@ describe("GET /api/catalog/search", () => {
         coverUrl: "https://images.igdb.com/igdb/image/upload/t_cover_big/abc.jpg",
         genres: ["Role-playing (RPG)"],
         releaseYear: 2020,
+        releaseDate: "2020-09-17",
+        rating: 93,
+        ratingCount: 2100,
       },
-      { igdbId: 2, title: "No Metadata", coverUrl: null, genres: [], releaseYear: null },
+      {
+        igdbId: 2,
+        title: "No Metadata",
+        coverUrl: null,
+        genres: [],
+        releaseYear: null,
+        releaseDate: null,
+        rating: null,
+        ratingCount: 0,
+      },
     ]);
   });
 
@@ -125,6 +149,16 @@ describe("GET /api/catalog/search", () => {
 
     const igdbCall = fetchMock.mock.calls.find(([url]) => String(url).includes("igdb.com"));
     expect(igdbCall?.[1].body).toContain('search "ha\\"des";');
+  });
+
+  it("asks IGDB to leave out DLC and special editions", async () => {
+    mockIgdb(() => json([]));
+
+    await request(app).get("/api/catalog/search").query({ q: "hades" });
+
+    const igdbCall = fetchMock.mock.calls.find(([url]) => String(url).includes("igdb.com"));
+    expect(igdbCall?.[1].body).toContain("game_type = (0,4,8,9,10,11)");
+    expect(igdbCall?.[1].body).toContain("version_parent = null");
   });
 
   it("returns 502 when IGDB fails, without leaking upstream details", async () => {
@@ -202,6 +236,129 @@ describe("GET /api/library", () => {
     expect(db.userGame.findMany.mock.calls[0][0].where).toEqual({ userId: "user_a" });
     expect(res.body.data[0]).toMatchObject({ id: "entry_1", game: { igdbId: 113112 } });
     expect(res.body.data[0].userId).toBeUndefined();
+  });
+});
+
+describe("GET /api/library/:id", () => {
+  it("scopes the lookup to the authenticated user and adds IGDB details", async () => {
+    db.userGame.findFirst.mockResolvedValue(hadesEntry);
+    mockIgdb(() => json([{ id: 113112, name: "Hades", summary: "Escape the Underworld." }]));
+
+    const res = await request(app).get("/api/library/entry_1").set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(db.userGame.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "entry_1", userId: "user_a" } }),
+    );
+    expect(res.body.data.summary).toBe("Escape the Underworld.");
+    expect(res.body.data.pickerChoices).toEqual(["Action", "RPG", "Single-player"]);
+    expect(res.body.data.userId).toBeUndefined();
+  });
+
+  it("returns 404 when the entry belongs to another user", async () => {
+    db.userGame.findFirst.mockResolvedValue(null);
+
+    const res = await request(app).get("/api/library/entry_1").set("x-test-user", "user_b");
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("LIBRARY_ITEM_NOT_FOUND");
+  });
+
+  it("still returns the entry when IGDB is unavailable", async () => {
+    db.userGame.findFirst.mockResolvedValue(hadesEntry);
+    mockIgdb(() => json({}, 500));
+
+    const res = await request(app).get("/api/library/entry_1").set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.summary).toBeNull();
+    expect(res.body.data.game.title).toBe("Hades");
+  });
+});
+
+describe("PATCH /api/library/:id", () => {
+  it("saves the session tag for the authenticated user's entry only", async () => {
+    db.userGame.updateMany.mockResolvedValue({ count: 1 });
+    db.userGame.findFirst.mockResolvedValue({ ...hadesEntry, sessionLength: "SHORT" });
+
+    const res = await request(app)
+      .patch("/api/library/entry_1")
+      .set("x-test-user", "user_a")
+      .send({ sessionLength: "SHORT" });
+
+    expect(res.status).toBe(200);
+    expect(db.userGame.updateMany).toHaveBeenCalledWith({
+      where: { id: "entry_1", userId: "user_a" },
+      data: { sessionLength: "SHORT" },
+    });
+    expect(res.body.data.sessionLength).toBe("SHORT");
+  });
+
+  it("accepts null to clear the tag and rejects unknown values", async () => {
+    db.userGame.updateMany.mockResolvedValue({ count: 1 });
+    db.userGame.findFirst.mockResolvedValue(hadesEntry);
+
+    const cleared = await request(app)
+      .patch("/api/library/entry_1")
+      .set("x-test-user", "user_a")
+      .send({ sessionLength: null });
+    const invalid = await request(app)
+      .patch("/api/library/entry_1")
+      .set("x-test-user", "user_a")
+      .send({ sessionLength: "FOREVER" });
+
+    expect(cleared.status).toBe(200);
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 404 when the entry belongs to another user", async () => {
+    db.userGame.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await request(app)
+      .patch("/api/library/entry_1")
+      .set("x-test-user", "user_b")
+      .send({ sessionLength: "LONG" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("LIBRARY_ITEM_NOT_FOUND");
+  });
+});
+
+describe("POST /api/library/:id/picks", () => {
+  it("records a pick against the authenticated user", async () => {
+    db.userGame.findFirst.mockResolvedValue(hadesEntry);
+
+    const res = await request(app)
+      .post("/api/library/entry_1/picks")
+      .set("x-test-user", "user_a")
+      .send({ availableTime: "UNDER_30", userId: "someone_else" });
+
+    expect(res.status).toBe(201);
+    expect(db.pick.create).toHaveBeenCalledWith({
+      data: { userId: "user_a", userGameId: "entry_1", availableTime: "UNDER_30" },
+    });
+  });
+
+  it("does not record a pick for another user's entry", async () => {
+    db.userGame.findFirst.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post("/api/library/entry_1/picks")
+      .set("x-test-user", "user_b")
+      .send({ availableTime: "UNDER_30" });
+
+    expect(res.status).toBe(404);
+    expect(db.pick.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown time answer with 400", async () => {
+    const res = await request(app)
+      .post("/api/library/entry_1/picks")
+      .set("x-test-user", "user_a")
+      .send({ availableTime: "ALL_DAY" });
+
+    expect(res.status).toBe(400);
   });
 });
 
@@ -318,6 +475,35 @@ describe("DELETE /api/library/:id", () => {
     expect(db.userGame.deleteMany).toHaveBeenCalledWith({
       where: { id: "entry_1", userId: "user_b" },
     });
+  });
+});
+
+describe("GET /api/recommendations/options", () => {
+  it("counts the authenticated user's games for each picker type", async () => {
+    db.userGame.findMany.mockResolvedValue([hadesEntry]);
+
+    const res = await request(app)
+      .get("/api/recommendations/options")
+      .set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(db.userGame.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user_a" } }),
+    );
+
+    const counts = Object.fromEntries(
+      res.body.data.genres.map((genre: { name: string; count: number }) => [genre.name, genre.count]),
+    );
+    expect(counts.RPG).toBe(1);
+    expect(counts.Action).toBe(1);
+    expect(counts.Racing).toBe(0);
+    expect(res.body.data.genres).toHaveLength(11);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/recommendations/options");
+
+    expect(res.status).toBe(401);
   });
 });
 

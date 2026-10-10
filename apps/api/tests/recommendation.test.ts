@@ -10,10 +10,15 @@ function entry(
   genres: string[],
   gameModes: string[],
   themes: string[] = [],
+  extra: Partial<Pick<LibraryEntry, "sessionLength" | "pickedFor">> & {
+    timeToBeatHours?: number | null;
+  } = {},
 ): LibraryEntry {
   return {
     id: `entry-${title}`,
     addedAt: "2026-10-08T00:00:00.000Z",
+    sessionLength: extra.sessionLength ?? null,
+    pickedFor: extra.pickedFor ?? [],
     game: {
       igdbId: title.length,
       title,
@@ -22,6 +27,7 @@ function entry(
       themes,
       gameModes,
       releaseDate: null,
+      timeToBeatHours: extra.timeToBeatHours ?? null,
     },
   };
 }
@@ -68,6 +74,75 @@ describe("rankLibrary", () => {
     });
 
     expect(results).toHaveLength(3);
+  });
+
+  describe("session length", () => {
+    const short = { availableTime: "UNDER_30", genres: [], gameMode: "EITHER" } as const;
+    const reasonsFor = (games: LibraryEntry[], input: Parameters<typeof rankLibrary>[1]) =>
+      rankLibrary(games, input)[0].reasons;
+
+    it("trusts the player's tag over the genre guess", () => {
+      // An RPG would normally count as a long-session game.
+      const tagged = entry("Hades", ["Role-playing (RPG)"], [], [], { sessionLength: "SHORT" });
+
+      expect(reasonsFor([tagged], { ...short, genres: [] })).toEqual([
+        "You tagged this for short sessions",
+      ]);
+      expect(
+        reasonsFor([tagged], { availableTime: "TWO_PLUS_HOURS", genres: [], gameMode: "EITHER" }),
+      ).toEqual(["From your library"]);
+    });
+
+    it("ranks a tagged game above a genre guess", () => {
+      const tagged = entry("Tagged", ["Role-playing (RPG)"], [], [], { sessionLength: "SHORT" });
+      const guessed = entry("Guessed", ["Puzzle"], []);
+
+      const results = rankLibrary([guessed, tagged], { ...short, genres: [] });
+
+      expect(results[0].title).toBe("Tagged");
+    });
+
+    it("learns from earlier picks made with similar time", () => {
+      const picked = entry("Adventure Game", ["Adventure"], [], [], {
+        pickedFor: ["THIRTY_TO_SIXTY"],
+      });
+
+      expect(reasonsFor([picked], { ...short, genres: [] })).toEqual([
+        "You picked this before with similar time",
+      ]);
+    });
+
+    it("counts a shooter as short only when it has multiplayer", () => {
+      const campaign = entry("Campaign", ["Shooter"], ["Single player"]);
+      const online = entry("Online", ["Shooter"], ["Multiplayer"]);
+
+      expect(reasonsFor([campaign], { ...short, genres: [] })).toEqual(["From your library"]);
+      expect(reasonsFor([online], { ...short, genres: [] })).toEqual(["Suits a shorter session"]);
+    });
+
+    it("falls back to the game's overall length when genres say nothing", () => {
+      const brief = entry("Brief", ["Indie"], [], [], { timeToBeatHours: 3 });
+      const epic = entry("Epic", ["Indie"], [], [], { timeToBeatHours: 80 });
+
+      expect(reasonsFor([brief], { ...short, genres: [] })).toEqual(["A short game overall"]);
+      expect(
+        reasonsFor([epic], { availableTime: "TWO_PLUS_HOURS", genres: [], gameMode: "EITHER" }),
+      ).toEqual(["A long game overall"]);
+    });
+  });
+
+  it("skips games that were already shown", () => {
+    const first = rankLibrary(library, { availableTime: "ANY", genres: [], gameMode: "EITHER" });
+    const second = rankLibrary(library, {
+      availableTime: "ANY",
+      genres: [],
+      gameMode: "EITHER",
+      exclude: first.map((game) => game.id),
+    });
+
+    expect(first).toHaveLength(3);
+    expect(second.length).toBeGreaterThan(0);
+    expect(second.some((game) => first.some((shown) => shown.id === game.id))).toBe(false);
   });
 
   it("excludes games that do not support the requested mode", () => {

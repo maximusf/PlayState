@@ -1,8 +1,14 @@
 import { AppError } from "../lib/errors";
 
 const TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token";
-const IGDB_GAMES_URL = "https://api.igdb.com/v4/games";
+const IGDB_URL = "https://api.igdb.com/v4";
 const REQUEST_TIMEOUT_MS = 8000;
+
+// Search only returns things a player would add to a library.
+// game_type keeps main games (0), standalone expansions (4), remakes (8), remasters (9),
+// expanded games (10), and ports (11). It drops DLC, packs, seasons, bundles, mods, and updates.
+// version_parent = null drops special editions of a game that is already listed.
+const PLAYABLE_GAMES = "game_type = (0,4,8,9,10,11) & version_parent = null";
 
 export type GameSearchResult = {
   igdbId: number;
@@ -10,6 +16,10 @@ export type GameSearchResult = {
   coverUrl: string | null;
   genres: string[];
   releaseYear: number | null;
+  releaseDate: string | null;
+  // IGDB's combined critic and player score out of 100, and how many ratings it is based on.
+  rating: number | null;
+  ratingCount: number;
 };
 
 export type GameDetails = {
@@ -21,6 +31,7 @@ export type GameDetails = {
   gameModes: string[];
   platforms: string[];
   releaseDate: string | null;
+  summary: string | null;
 };
 
 // The subset of IGDB's raw game shape this service asks for.
@@ -34,6 +45,9 @@ type IgdbGame = {
   game_modes?: IgdbNamed[];
   platforms?: IgdbNamed[];
   first_release_date?: number;
+  summary?: string;
+  total_rating?: number;
+  total_rating_count?: number;
 };
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
@@ -87,12 +101,16 @@ async function getAccessToken(): Promise<string> {
   return cachedToken.value;
 }
 
-async function queryGames(query: string, isRetry = false): Promise<IgdbGame[]> {
+function queryGames(query: string): Promise<IgdbGame[]> {
+  return queryIgdb<IgdbGame>("games", query);
+}
+
+async function queryIgdb<T>(endpoint: string, query: string, isRetry = false): Promise<T[]> {
   try {
     const { clientId } = getCredentials();
     const token = await getAccessToken();
 
-    const response = await fetch(IGDB_GAMES_URL, {
+    const response = await fetch(`${IGDB_URL}/${endpoint}`, {
       method: "POST",
       headers: {
         "Client-ID": clientId,
@@ -106,7 +124,7 @@ async function queryGames(query: string, isRetry = false): Promise<IgdbGame[]> {
     // A rejected token may have been revoked early. Fetch a new one once.
     if (response.status === 401 && !isRetry) {
       cachedToken = null;
-      return queryGames(query, true);
+      return queryIgdb<T>(endpoint, query, true);
     }
 
     if (!response.ok) {
@@ -114,7 +132,7 @@ async function queryGames(query: string, isRetry = false): Promise<IgdbGame[]> {
       throw unavailable();
     }
 
-    return (await response.json()) as IgdbGame[];
+    return (await response.json()) as T[];
   } catch (error) {
     if (error instanceof AppError) throw error;
 
@@ -146,7 +164,7 @@ export async function searchGames(term: string): Promise<GameSearchResult[]> {
   // Apicalypse strings are double-quoted, so escape quotes and backslashes.
   const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const games = await queryGames(
-    `search "${escaped}"; fields name,cover.image_id,genres.name,first_release_date; limit 20;`,
+    `search "${escaped}"; fields name,cover.image_id,genres.name,first_release_date,total_rating,total_rating_count; where ${PLAYABLE_GAMES}; limit 40;`,
   );
 
   return games.map((game) => ({
@@ -155,12 +173,27 @@ export async function searchGames(term: string): Promise<GameSearchResult[]> {
     coverUrl: coverUrl(game),
     genres: names(game.genres),
     releaseYear: releaseDate(game)?.getUTCFullYear() ?? null,
+    releaseDate: releaseDate(game)?.toISOString().slice(0, 10) ?? null,
+    rating: game.total_rating === undefined ? null : Math.round(game.total_rating),
+    ratingCount: game.total_rating_count ?? 0,
   }));
+}
+
+// IGDB's "normally" time to finish a game, rounded to whole hours. Null when unknown.
+// This is how long the whole game takes, not how long one sitting is.
+export async function getTimeToBeatHours(igdbId: number): Promise<number | null> {
+  const [times] = await queryIgdb<{ normally?: number }>(
+    "game_time_to_beats",
+    `fields normally; where game_id = ${igdbId}; limit 1;`,
+  );
+
+  // IGDB reports seconds.
+  return times?.normally ? Math.max(1, Math.round(times.normally / 3600)) : null;
 }
 
 export async function getGameDetails(igdbId: number): Promise<GameDetails | null> {
   const [game] = await queryGames(
-    `fields name,cover.image_id,genres.name,themes.name,game_modes.name,platforms.name,first_release_date; where id = ${igdbId}; limit 1;`,
+    `fields name,cover.image_id,genres.name,themes.name,game_modes.name,platforms.name,first_release_date,summary; where id = ${igdbId}; limit 1;`,
   );
 
   if (!game) return null;
@@ -174,5 +207,6 @@ export async function getGameDetails(igdbId: number): Promise<GameDetails | null
     gameModes: names(game.game_modes),
     platforms: names(game.platforms),
     releaseDate: releaseDate(game)?.toISOString().slice(0, 10) ?? null,
+    summary: game.summary ?? null,
   };
 }

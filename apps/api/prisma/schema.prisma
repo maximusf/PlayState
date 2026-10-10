@@ -10,11 +10,13 @@ datasource db {
 
 // Shared game metadata, cached from IGDB the first time any user adds the game.
 model Game {
-  id          String    @id @default(cuid())
-  igdbId      Int       @unique
-  title       String
-  coverUrl    String?
-  releaseDate DateTime?
+  id              String    @id @default(cuid())
+  igdbId          Int       @unique
+  title           String
+  coverUrl        String?
+  releaseDate     DateTime?
+  // IGDB's "normally" time to finish the game, in hours. Null when IGDB has none.
+  timeToBeatHours Int?
 
   genres    String[]
   themes    String[]
@@ -32,10 +34,37 @@ model UserGame {
   userId String
   gameId String
 
-  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  game  Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  picks Pick[]
+
+  // How long this player's sittings with the game usually are. Null until they say.
+  sessionLength SessionLength?
 
   createdAt DateTime @default(now())
 
   @@unique([userId, gameId])
   @@index([userId])
+}
+
+enum SessionLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+// One row each time a player presses "Choose this" on a suggestion.
+// availableTime is the picker answer they gave, so later picks can learn from it.
+model Pick {
+  id         String @id @default(cuid())
+  userId     String
+  userGameId String
+
+  userGame UserGame @relation(fields: [userGameId], references: [id], onDelete: Cascade)
+
+  availableTime String
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userGameId])
 }
