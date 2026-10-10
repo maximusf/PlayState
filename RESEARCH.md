@@ -1,6 +1,20 @@
 # Research Findings
 
-Notes recorded while building the PlayState Research Milestone. Items marked "not yet verified" depend on deployment steps that were still pending when the note was written.
+Notes recorded while building the PlayState Research Milestone.
+
+## Summary for the team
+
+| Technology | Verdict | Main thing to know |
+|---|---|---|
+| Next.js | Use | Version 16 renamed Middleware to Proxy, and most tutorials are out of date |
+| Express | Use | Route, Controller, Service kept the API small and easy to test |
+| Clerk | Use | Works well, but the SDK changes quickly, so pin versions |
+| Prisma + Supabase | Use | Prisma 7 setup differs from most guides, and Supabase needs two connection strings |
+| IGDB | Use for metadata | No session-length data, and search results need filtering |
+| Zod | Use | One schema per endpoint validates and types the input |
+| npm workspaces | Use | One lockfile for both apps, with hosts building from the repository root |
+| Render | Use for demos | The free plan sleeps when idle |
+| Vercel | Use | The simplest part of the deployment |
 
 ## Next.js
 
@@ -82,6 +96,7 @@ Yes, with versions pinned and the upgrade guides read before any major version b
 - Prisma 7 changed setup compared with most guides: the connection URL moved to `prisma.config.ts`, a driver adapter (`@prisma/adapter-pg`) is required, and the client is generated into the source tree.
 - npm's `latest` tag pointed at a Prisma 8 release candidate, so the version was pinned to 7.
 - Supabase needs two connection strings: a pooled one for the running API and a direct or session one for migrations.
+- `prisma migrate dev` needs a second, empty "shadow" database, which a single Supabase project does not provide. The second migration was written with `prisma migrate diff` against the live database and applied with `prisma migrate deploy`.
 - Supabase exposes the `public` schema through its own Data API. Tables created by Prisma have row level security disabled by default, so the migration enables it explicitly.
 - The connection strings Supabase shows contain a `[YOUR-PASSWORD]` placeholder. Replacing only the words and leaving the square brackets produces a valid-looking URL that fails to authenticate.
 - The first request after the API starts is slow while the connection pool opens. Later requests are fast.
@@ -104,8 +119,9 @@ Yes. The typed client and migrations are worth the setup. Budget time for connec
 - The query language (Apicalypse) is sent as plain text in a POST body, so user input must be escaped by hand.
 - Cover art arrives as an image ID that has to be turned into a URL.
 - Fields are omitted when empty, so every field must be treated as optional during normalization.
-- There is no session-length data. Time-to-beat is about finishing a game, not one sitting, so time matching is a rough genre-based hint.
-- Search results include editions, add-on packs, and unrelated older games with the same name, so the first result is not always the one a user expects.
+- There is no session-length data. A separate endpoint (`game_time_to_beats`) gives the hours needed to finish a game, which is not the same as one sitting. PlayState treats genre and time to beat as fallback guesses and lets the player's own tag and past picks override them.
+- Raw search results include DLC, season packs, bundles, and special editions. Filtering on `game_type` and `version_parent` removes them. The older `category` field is deprecated and matched nothing.
+- Unrelated games with the same name still appear, so the first result is not always the one a user expects.
 - Registering a Twitch application requires an OAuth redirect URL even though the client-credentials flow never uses one. `http://localhost` is enough.
 - Verified: live search, game details, and cover art work with real credentials.
 
@@ -130,10 +146,56 @@ Yes for metadata. Anything about how a game feels to play will need PlayState's 
 
 Yes. It replaced hand-written checks at every boundary and kept bad input out of the services. It was used only at request boundaries.
 
+## npm workspaces
+
+### What Worked Well
+
+- One `npm install` at the repository root installs both apps, and one `package-lock.json` keeps their versions consistent.
+- `npm run <script> -w apps/api` runs a script in one app, and `--workspaces --if-present` runs it in every app that defines it.
+- Root scripts (`dev:web`, `dev:api`, `build`, `lint`, `test`) give the team one place to look for commands.
+
+### Difficulties
+
+- Converting two separately created apps meant deleting each app's own lockfile and reinstalling from the root.
+- Hosts must be told where each app lives: Vercel uses a Root Directory setting, and Render builds from the root with `-w apps/api`.
+- npm's `latest` tag can point at a release candidate, which is how Prisma 8 nearly got installed. Check the version before accepting a default.
+- Production installs skip dev dependencies, so the Render build needs `--include=dev` for TypeScript and Prisma.
+
+### Would We Use It for the Capstone?
+
+Yes. It needs no extra tool, and it is enough for two apps.
+
 ## Render
 
-Deployment experience: not yet verified. A `render.yaml` blueprint defines the service. Expected points to confirm: installing dev dependencies during the build (`--include=dev`) so TypeScript and Prisma are available, running migrations in the build step, and cold starts on the free plan.
+### What Worked Well
+
+- A `render.yaml` blueprint in the repository defined the service, build command, start command, and health check, so the dashboard only asked for the secret values.
+- The first deploy succeeded without changes. The build installs dev dependencies (`--include=dev`) so TypeScript and Prisma are available, then runs `prisma migrate deploy`.
+- Every push to `main` redeploys the API automatically.
+
+### Difficulties
+
+- The dashboard takes values literally. Quotes copied from a `.env` file become part of the value and break the database URL.
+- The free plan sleeps after about 15 minutes without traffic, and the next request takes up to a minute.
+- Free workspaces are aimed at one person. Team access to logs and settings appears to need a paid plan.
+
+### Would We Use It for the Capstone?
+
+Yes for development and demos. Cold starts would need a paid plan or a different host before real users.
 
 ## Vercel
 
-Deployment experience: not yet verified. Expected points to confirm: setting the Root Directory to `apps/web` in an npm workspace, and adding the Clerk and API URL variables before the first build.
+### What Worked Well
+
+- Importing the repository with the Root Directory set to `apps/web` worked with the default Next.js settings, even inside an npm workspace. The build took under a minute.
+- Every push to `main` redeploys the site automatically.
+
+### Difficulties
+
+- The project name was taken, so the URL became `playstate-nu.vercel.app`. The API's CORS allowlist (`FRONTEND_URL`) had to be updated to the real address.
+- `NEXT_PUBLIC_*` values are fixed at build time, so the API had to be deployed first to know its URL.
+- Vercel offers a Clerk integration during setup. It was skipped because the site and the API must share one Clerk application, and the keys were already set by hand.
+
+### Would We Use It for the Capstone?
+
+Yes. It was the simplest part of the deployment.

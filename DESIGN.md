@@ -20,6 +20,7 @@ Pixel styling is used only for: the logo mark, headings and small labels, tile a
 /sign-up          Clerk sign up (public)
 /library          Saved games (signed in)
 /library/add      Search the catalog and add games (signed in)
+/library/[id]     One game: cover, summary, tags, remove (signed in)
 /pick             Picker and results (signed in)
 ```
 
@@ -35,27 +36,29 @@ Landing -> Sign up / Sign in -> Library (empty) -> Add games -> Library -> Pick 
 
 ## Layout
 
-Mobile first, single column, content capped at 64rem and centered. 16px side gutter on phones, 24px from tablet up.
+Mobile first, single column, content capped at 72rem and centered. 16px side gutter on phones, 24px from tablet up.
 
 ```text
-Landing (desktop)                      Pick (phone)
-+----------------------------------+   +------------------+
-| logo            Sign in          |   | logo   Lib Pick  |
-+----------------------------------+   +------------------+
-| Find the right   | +-----------+ |   | How much time?   |
-| game for right   | | > 1-2 hrs | |   | [<30][30-60]     |
-| now.             | | Strategy  | |   | [1-2h][2h+][Any] |
-| [Get started]    | | Slot 1 .. | |   | What sounds good?|
-|                  | +-----------+ |   | [tiles, 2 col]   |
-+----------------------------------+   | How to play?     |
-                                       | [Solo][Multi][Either]
-                                       | [ Find games ]   |
-                                       +------------------+
+Landing (desktop)                        Pick, one question (phone)
++------------------------------------+   +--------------------+
+| logo                      Sign in  |   | logo     Lib Pick  |
++------------------------------------+   +--------------------+
+| Find the right  | Tonight [2h+]..  |   | Question 2 of 3    |
+| game for right  | +--------------+ |   | [###][###][   ]    |
+| now.            | | shelf of 12  | |   | So far: [2h+ Change]|
+| [Get started]   | | covers, 3    | |   | What sounds good?  |
+|                 | | lit as picks | |   | [tiles, 2 col]     |
++------------------------------------+   | ..................  |
+| 1 Build   2 Answer   3 Get picks   |   | [Back]      [Next] |
++------------------------------------+   +--------------------+
 ```
 
-- Library: cover grid, 2 columns on phones, up to 5 on desktop.
+- Landing: headline and actions beside a shelf of twelve IGDB covers, nine dimmed and three lit as picks, then a three-step "how it works" row.
+- Library: cover-first tiles, 2 columns on phones, up to 5 on desktop. Each tile links to the game's page. A row of genre filters appears when the library has more than one genre. The grid ends with an "Add a game" tile.
+- Game page: large cover beside the title, release year, IGDB summary, and genre, theme, and mode tags. A row of four buttons asks how long the player usually plays it, and the picker trusts that answer over its own guess. A box lists the picker choices that can suggest the game. Remove lives here.
 - Add game: search field and button on one row, results as a vertical list of rows (cover, title, year, genres, Add).
-- Pick: three fieldsets stacked. Results render below the form on the same page and receive focus.
+- Pick: one centered question per screen with a three-segment progress bar. Earlier answers show as chips that jump back to that question. Back and Next sit in a bar under the tiles, and the last question's button reads "Find games".
+- Results: replace the questions. Up to three cover-first cards side by side, with the answers as chips and "Change answers" and "Pick again" beside the heading.
 
 ## Color tokens
 
@@ -63,15 +66,17 @@ Defined once in `apps/web/src/app/globals.css` as Tailwind theme tokens.
 
 | Token | Hex | Use |
 |---|---|---|
-| `paper` | `#FAFBF8` | Page background |
-| `surface` | `#FFFFFF` | Cards, inputs |
-| `sage` | `#D9EAD7` | Quiet fills, placeholders |
+| `paper` | `#D9EAD7` | Page background |
+| `surface` | `#FAFBF8` | Header, cards, inputs |
+| `sage` | `#D9EAD7` | Same value as the page, kept for small fills |
+| `fern` | `#8FB58C` | Quiet frames, dotted rules, unselected tiles |
+| `pine` | `#065F46` | Green text and numerals on light backgrounds |
 | `mint` | `#A7F3D0` | Selected fills, badges |
 | `emerald` | `#10B981` | Primary actions, focus |
 | `leaf` | `#22C55E` | Accents, cursor, hover |
 | `forest` | `#0F2D23` | Headings, frames, text on green |
 | `slate` | `#1F2937` | Body text |
-| `muted` | `#4B5B55` | Secondary text |
+| `muted` | `#3F4D47` | Secondary text |
 | `danger` | `#B42318` | Errors, destructive actions |
 
 Contrast rules: body text is `slate` on `paper`. Text on `emerald`, `leaf`, or `mint` is always `forest`, never white. No purple anywhere.
@@ -80,7 +85,7 @@ Contrast rules: body text is `slate` on `paper`. Text on `emerald`, `leaf`, or `
 
 | Role | Face | Notes |
 |---|---|---|
-| Display | Pixelify Sans (OFL) | Wordmark, page headings, small uppercase labels, badges |
+| Display | Jersey 10 (OFL) | Wordmark, page headings, small uppercase labels, badges |
 | Body | Figtree (OFL) | Everything else |
 
 Both load through `next/font`, which self-hosts them at build time (no runtime request to Google, no extra npm dependency). The pixel face is never used for paragraphs, form values, or error messages.
@@ -104,12 +109,14 @@ Scale: 14 / 16 / 18 / 24 / 32 / 48 (hero only, 36 on phones). Labels in the pixe
 
 ## UX behavior
 
-- Picker defaults: Any time, no types selected (means anything), Either. A player can press Find games immediately.
+- Picker defaults: Any time, no types selected (means anything), Either. A player can press Next twice and Find games without changing anything.
 - Types are multi-select. Time and mode are single-select.
 - Results show plain reasons such as "Matches Strategy" and "Supports single-player". No percentages or scores.
-- "Choose this" marks one result as the pick. "Pick again" reruns with the same answers.
+- "Choose this" marks one result as the pick, fades the other two, and links to that game's page. The choice is saved with the time answer, so later picks can learn from it.
+- "Pick again" reruns with the same answers and leaves out games already shown. When every match has been shown, it says so and the next press starts over.
 - Add game: Add buttons switch to "Added" in place. A duplicate shows "Already in your library" on that row.
-- Remove is immediate, with the row disabled while the request runs.
+- Remove is on the game page. It is immediate, the button is disabled while the request runs, and the player returns to the library.
+- Library filters only hide tiles. They never change what the picker considers.
 
 ## States
 

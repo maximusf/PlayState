@@ -67,6 +67,18 @@ Three rules hold everywhere:
 - Every library query is scoped to that user ID.
 - IGDB and Twitch credentials exist only on the API server. The browser talks to PlayState, and PlayState talks to IGDB.
 
+## Data model
+
+Three tables in PostgreSQL, managed by Prisma migrations.
+
+| Table | One row per | Key columns |
+|---|---|---|
+| `Game` | Game, shared by every user | `igdbId` (unique), title, cover, genres, themes, modes, `timeToBeatHours` |
+| `UserGame` | Game in one user's library | `userId` (Clerk user ID), `gameId`, `sessionLength`. Unique on `(userId, gameId)` |
+| `Pick` | Time a user chose a suggestion | `userId`, `userGameId`, `availableTime` |
+
+Game metadata is stored once and shared. Everything personal (which games a user owns, their session tags, their picks) sits in rows that carry that user's ID, and every query filters on it. Deleting a library entry also deletes its picks. Row level security is enabled on all three tables, so the data is reachable only through this API.
+
 ## Getting started
 
 Requirements: Node.js 20.9 or newer (developed on Node 24) and npm.
@@ -154,8 +166,12 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/catalog/search?q=` | No | Search IGDB by title (2 to 100 characters) | 200, 400, 502 |
 | GET | `/api/catalog/games/:igdbId` | No | Details for one game | 200, 400, 404, 502 |
 | GET | `/api/library` | Yes | The signed-in user's games | 200, 401 |
+| GET | `/api/library/:id` | Yes | One library entry, with its IGDB summary and the picker choices that can suggest it | 200, 401, 404 |
+| PATCH | `/api/library/:id` | Yes | Set or clear how long the user usually plays this game, body `{ "sessionLength": "SHORT" }` | 200, 400, 401, 404 |
+| POST | `/api/library/:id/picks` | Yes | Record that the user chose this suggestion, body `{ "availableTime": "UNDER_30" }` | 201, 400, 401, 404 |
 | POST | `/api/library` | Yes | Add a game, body `{ "igdbId": 113112 }` | 201, 400, 401, 404, 409, 502 |
 | DELETE | `/api/library/:id` | Yes | Remove a library entry | 204, 401, 404 |
+| GET | `/api/recommendations/options` | Yes | How many library games each picker type can suggest | 200, 401 |
 | POST | `/api/recommendations` | Yes | Up to three suggestions | 200, 400, 401 |
 
 Recommendation request:
@@ -164,13 +180,15 @@ Recommendation request:
 {
   "availableTime": "ONE_TO_TWO_HOURS",
   "genres": ["Strategy", "Simulation"],
-  "gameMode": "SINGLE_PLAYER"
+  "gameMode": "SINGLE_PLAYER",
+  "exclude": []
 }
 ```
 
 - `availableTime`: `UNDER_30`, `THIRTY_TO_SIXTY`, `ONE_TO_TWO_HOURS`, `TWO_PLUS_HOURS`, `ANY`
 - `genres`: any of `Action`, `Adventure`, `RPG`, `Strategy`, `Simulation`, `Shooter`, `Puzzle`, `Platformer`, `Racing`, `Sports`, `Sandbox`. An empty list means anything.
 - `gameMode`: `SINGLE_PLAYER`, `MULTIPLAYER`, `EITHER`
+- `exclude`: optional list of library entry IDs to leave out. The picker sends the games it has already shown, so "Pick again" returns different ones.
 
 Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `INTERNAL_ERROR`.
 
@@ -183,11 +201,18 @@ Only games in the signed-in user's library are considered.
 | Game matches a selected type directly | +2 per type |
 | Game matches a related genre or theme | +1 per type |
 | Game supports the requested mode | +1 |
-| Game's genres suit the session length | +1 |
+| Session length fits (see below) | +1 or +2 |
 
 - If types were selected, a game must match at least one.
 - If a mode was requested and the game lists its modes without it, the game is left out. Games with no mode data stay in.
-- Time only adds a point. IGDB has no session-length data, so it never removes a game.
+- Time only adds points. It never removes a game.
+
+IGDB has no data on how long a sitting lasts, so session length uses the best evidence available, in this order:
+
+1. The player's own tag on the game page ("Under an hour", "1 to 2 hours", "2+ hours"). A match is worth 2 points, and a tag that does not match means no time points at all.
+2. Earlier picks. If the player chose this game before with a similar amount of time, 1 point.
+3. Genres and themes, as a guess. Puzzle and racing games lean short, role-playing and strategy games lean long, and a shooter counts as short only when it has multiplayer. 1 point.
+4. The game's overall length from IGDB, used only when the genres say nothing. 1 point.
 - Games are sorted by points, ties are shuffled, and the top three are returned.
 
 ## Deployment
@@ -197,6 +222,12 @@ Only games in the signed-in user's library are considered.
 | `apps/web` | Vercel | Set the project Root Directory to `apps/web` and add the web variables |
 | `apps/api` | Render | `render.yaml` defines the web service, build, start, and health check |
 | Database | Supabase | Migrations run during the Render build with `prisma migrate deploy` |
+
+Live site: https://playstate-nu.vercel.app
+
+Live API: https://playstate-api.onrender.com/api/health
+
+The API runs on Render's free plan and sleeps when idle, so the first request can take up to a minute.
 
 After both are live, set `NEXT_PUBLIC_API_URL` on Vercel to the Render URL, and `FRONTEND_URL` on Render to the Vercel URL. CORS only accepts origins listed in `FRONTEND_URL`.
 
@@ -208,6 +239,16 @@ After both are live, set `NEXT_PUBLIC_API_URL` on Vercel to the Render URL, and 
 ## About this build
 
 This version of PlayState was built as an individual Research Milestone project to evaluate the stack above for a later capstone. It is intentionally small: one library, one picker, and a scoring method that can be explained in a paragraph.
+
+What it demonstrates:
+
+| Step | In PlayState |
+|---|---|
+| The user enters data | Signs in, searches the catalog by title, adds games, and answers three picker questions |
+| The program processes it | The API validates the input, fetches and normalizes IGDB data, stores it per user in PostgreSQL, and scores the library against the answers |
+| The result is shown | A library of saved games, a page for each game, and up to three picks with the reasons for each |
+
+Findings about each technology, including what was hard and whether it is worth using for the capstone, are in [RESEARCH.md](RESEARCH.md).
 
 ## License
 
