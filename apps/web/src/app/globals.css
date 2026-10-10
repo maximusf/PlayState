@@ -1,26 +1,143 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* PlayState design tokens. See DESIGN.md. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-paper: #fafbf8;
+  --color-surface: #ffffff;
+  --color-sage: #d9ead7;
+  --color-mint: #a7f3d0;
+  --color-emerald: #10b981;
+  --color-leaf: #22c55e;
+  --color-forest: #0f2d23;
+  --color-slate: #1f2937;
+  --color-muted: #4b5b55;
+  --color-danger: #b42318;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-pixel: var(--font-display), ui-monospace, monospace;
+
+  --animate-step: step 0.9s steps(1) infinite;
+  --animate-blink: blink 1s steps(1) infinite;
+
+  @keyframes step {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    33% {
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  body {
+    background: var(--color-paper);
+    color: var(--color-slate);
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-forest);
+    outline-offset: 3px;
+  }
+}
+
+/* Stepped pixel corners, drawn with four hard shadows around the box. */
+@utility pixel-frame {
+  box-shadow:
+    -4px 0 0 0 var(--frame, var(--color-forest)),
+    4px 0 0 0 var(--frame, var(--color-forest)),
+    0 -4px 0 0 var(--frame, var(--color-forest)),
+    0 4px 0 0 var(--frame, var(--color-forest));
+}
+
+/* Same frame plus a hard drop shadow, for things that can be pressed. */
+@utility pixel-raised {
+  box-shadow:
+    -4px 0 0 0 var(--color-forest),
+    4px 0 0 0 var(--color-forest),
+    0 -4px 0 0 var(--color-forest),
+    0 4px 0 0 var(--color-forest),
+    0 8px 0 0 var(--color-forest);
+}
+
+@utility pixel-label {
+  font-family: var(--font-pixel);
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@layer components {
+  .btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.25rem;
+    font-weight: 600;
+    color: var(--color-forest);
+    cursor: pointer;
+  }
+
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .btn-primary {
+    background: var(--color-emerald);
+    box-shadow:
+      -4px 0 0 0 var(--color-forest),
+      4px 0 0 0 var(--color-forest),
+      0 -4px 0 0 var(--color-forest),
+      0 4px 0 0 var(--color-forest),
+      0 8px 0 0 var(--color-forest);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-leaf);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow:
+      -4px 0 0 0 var(--color-forest),
+      4px 0 0 0 var(--color-forest),
+      0 -4px 0 0 var(--color-forest),
+      0 4px 0 0 var(--color-forest);
+  }
+
+  .btn-secondary {
+    background: var(--color-surface);
+    box-shadow:
+      -4px 0 0 0 var(--color-forest),
+      4px 0 0 0 var(--color-forest),
+      0 -4px 0 0 var(--color-forest),
+      0 4px 0 0 var(--color-forest);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--color-sage);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
