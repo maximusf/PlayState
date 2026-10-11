@@ -4,8 +4,8 @@ import { prisma } from "../lib/prisma";
 import { getGameDetails, getTimeToBeatHours } from "./igdb.service";
 import { matchingPickerChoices } from "./preferences";
 
-// Every library query loads the game and the answers the player chose it for.
-const withGame = { game: true, picks: { select: { availableTime: true } } } as const;
+// Every library query loads the game with the entry.
+const withGame = { game: true } as const;
 
 type UserGameWithGame = Prisma.UserGameGetPayload<{ include: typeof withGame }>;
 
@@ -19,8 +19,6 @@ function toLibraryEntry(entry: UserGameWithGame) {
     addedAt: entry.createdAt.toISOString(),
     // The player's own tag for how long their sittings with this game are.
     sessionLength: entry.sessionLength as SessionLength | null,
-    // The time answers the player gave when they chose this game before.
-    pickedFor: entry.picks.map((pick) => pick.availableTime),
     game: {
       igdbId: entry.game.igdbId,
       title: entry.game.title,
@@ -148,12 +146,6 @@ export async function setSessionLength(
   }
 
   return toLibraryEntry(await findOwnedEntry(userId, id));
-}
-
-// Records that the player chose this game for the given time answer.
-export async function recordPick(userId: string, id: string, availableTime: string): Promise<void> {
-  await findOwnedEntry(userId, id);
-  await prisma.pick.create({ data: { userId, userGameId: id, availableTime } });
 }
 
 export async function removeGameFromLibrary(userId: string, id: string): Promise<void> {

@@ -17,7 +17,6 @@ const db = vi.hoisted(() => ({
     deleteMany: vi.fn(),
   },
   game: { upsert: vi.fn(), update: vi.fn() },
-  pick: { create: vi.fn() },
 }));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
@@ -58,7 +57,6 @@ const hadesEntry = {
   gameId: "game_1",
   createdAt: new Date("2026-10-08"),
   sessionLength: null as string | null,
-  picks: [] as { availableTime: string }[],
   game: hadesRow,
 };
 
@@ -322,43 +320,6 @@ describe("PATCH /api/library/:id", () => {
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("LIBRARY_ITEM_NOT_FOUND");
-  });
-});
-
-describe("POST /api/library/:id/picks", () => {
-  it("records a pick against the authenticated user", async () => {
-    db.userGame.findFirst.mockResolvedValue(hadesEntry);
-
-    const res = await request(app)
-      .post("/api/library/entry_1/picks")
-      .set("x-test-user", "user_a")
-      .send({ availableTime: "UNDER_30", userId: "someone_else" });
-
-    expect(res.status).toBe(201);
-    expect(db.pick.create).toHaveBeenCalledWith({
-      data: { userId: "user_a", userGameId: "entry_1", availableTime: "UNDER_30" },
-    });
-  });
-
-  it("does not record a pick for another user's entry", async () => {
-    db.userGame.findFirst.mockResolvedValue(null);
-
-    const res = await request(app)
-      .post("/api/library/entry_1/picks")
-      .set("x-test-user", "user_b")
-      .send({ availableTime: "UNDER_30" });
-
-    expect(res.status).toBe(404);
-    expect(db.pick.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects an unknown time answer with 400", async () => {
-    const res = await request(app)
-      .post("/api/library/entry_1/picks")
-      .set("x-test-user", "user_a")
-      .send({ availableTime: "ALL_DAY" });
-
-    expect(res.status).toBe(400);
   });
 });
 

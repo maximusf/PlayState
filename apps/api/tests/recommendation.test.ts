@@ -10,7 +10,7 @@ function entry(
   genres: string[],
   gameModes: string[],
   themes: string[] = [],
-  extra: Partial<Pick<LibraryEntry, "sessionLength" | "pickedFor">> & {
+  extra: Partial<Pick<LibraryEntry, "sessionLength">> & {
     timeToBeatHours?: number | null;
   } = {},
 ): LibraryEntry {
@@ -18,7 +18,6 @@ function entry(
     id: `entry-${title}`,
     addedAt: "2026-10-08T00:00:00.000Z",
     sessionLength: extra.sessionLength ?? null,
-    pickedFor: extra.pickedFor ?? [],
     game: {
       igdbId: title.length,
       title,
@@ -100,16 +99,6 @@ describe("rankLibrary", () => {
       const results = rankLibrary([guessed, tagged], { ...short, genres: [] });
 
       expect(results[0].title).toBe("Tagged");
-    });
-
-    it("learns from earlier picks made with similar time", () => {
-      const picked = entry("Adventure Game", ["Adventure"], [], [], {
-        pickedFor: ["THIRTY_TO_SIXTY"],
-      });
-
-      expect(reasonsFor([picked], { ...short, genres: [] })).toEqual([
-        "You picked this before with similar time",
-      ]);
     });
 
     it("counts a shooter as short only when it has multiplayer", () => {

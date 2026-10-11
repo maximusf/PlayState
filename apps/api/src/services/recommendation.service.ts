@@ -56,7 +56,7 @@ const SHORT_GAME_HOURS = 6;
 const LONG_GAME_HOURS = 25;
 
 // Decides whether a game suits the requested session length, using the best evidence available:
-// the player's own tag, then their past picks, then genres, then the game's overall length.
+// the player's own tag, then genres, then the game's overall length.
 function sessionHint(
   entry: LibraryEntry,
   bucket: SessionBucket,
@@ -70,12 +70,7 @@ function sessionHint(
       : null;
   }
 
-  // 2. They chose this game before when they had a similar amount of time.
-  if (entry.pickedFor.some((answer) => SESSION_BUCKETS[answer] === bucket)) {
-    return { points: 1, reason: "You picked this before with similar time" };
-  }
-
-  // 3. Genres and themes. A shooter only counts as short when it has multiplayer matches.
+  // 2. Genres and themes. A shooter only counts as short when it has multiplayer matches.
   const tags = [...game.genres, ...game.themes];
   const short =
     hasAny(tags, SHORT_SESSION_TAGS) ||
