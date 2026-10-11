@@ -112,7 +112,7 @@ Scale: 14 / 16 / 18 / 24 / 32 / 48 (hero only, 36 on phones). Labels in the pixe
 - Picker defaults: Any time, no types selected (means anything), Either. A player can press Next twice and Find games without changing anything.
 - Types are multi-select. Time and mode are single-select.
 - Results show plain reasons such as "Matches Strategy" and "Supports single-player". No percentages or scores.
-- "Choose this" marks one result as the pick, fades the other two, and links to that game's page. The choice is saved with the time answer, so later picks can learn from it.
+- Each result has a "View game" button that opens that game's page. Nothing is saved when results are shown.
 - "Pick again" reruns with the same answers and leaves out games already shown. When every match has been shown, it says so and the next press starts over.
 - Add game: Add buttons switch to "Added" in place. A duplicate shows "Already in your library" on that row.
 - Remove is on the game page. It is immediate, the button is disabled while the request runs, and the player returns to the library.

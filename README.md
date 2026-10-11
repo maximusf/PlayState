@@ -4,6 +4,22 @@
 
 PlayState is a personalized game picker that matches your library to your available time and the kind of experience you want. Build a library from the IGDB catalog, answer three quick questions, and get up to three games worth playing tonight.
 
+![PlayState home page](docs/screenshots/01-home.png)
+
+## Screenshots
+
+| Library | Game page |
+|---|---|
+| ![A library of saved games with genre filters](docs/screenshots/02-library.png) | ![A game page with its summary, tags, and usual session length](docs/screenshots/03-game.png) |
+
+| Picker | Picks |
+|---|---|
+| ![The second picker question, with two types chosen](docs/screenshots/06-picker-types.png) | ![Three suggested games with the reasons for each](docs/screenshots/07-results.png) |
+
+| Search | First question |
+|---|---|
+| ![Search results for a game title, sorted by rating](docs/screenshots/04-search.png) | ![The first picker question, asking how much time you have](docs/screenshots/05-picker-time.png) |
+
 ## How it works
 
 1. Sign in.
@@ -29,18 +45,20 @@ Suggestions come from a small, explainable point system. There is no machine lea
 
 ## Architecture
 
-```text
-Browser
-  |
-  v
-Next.js on Vercel (apps/web)
-  |   Clerk session token sent as a Bearer header
-  v
-Express API on Render (apps/api)
-  |-- Clerk: verifies the token and identifies the user
-  |-- Zod: validates query, params, and body
-  |-- Prisma --> Supabase PostgreSQL
-  `-- IGDB service --> Twitch OAuth + IGDB
+```mermaid
+flowchart TD
+    browser["Browser"]
+    web["Next.js on Vercel<br/>apps/web"]
+    api["Express API on Render<br/>apps/api"]
+    clerk["Clerk<br/>verifies the session token"]
+    db[("Supabase PostgreSQL")]
+    igdb["IGDB<br/>via Twitch OAuth"]
+
+    browser --> web
+    web -- "Clerk session token<br/>as a Bearer header" --> api
+    api -- "who is this user?" --> clerk
+    api -- "Prisma" --> db
+    api -- "search and game details" --> igdb
 ```
 
 The repository is an npm workspace with two apps:
@@ -69,15 +87,14 @@ Three rules hold everywhere:
 
 ## Data model
 
-Three tables in PostgreSQL, managed by Prisma migrations.
+Two tables in PostgreSQL, managed by Prisma migrations.
 
 | Table | One row per | Key columns |
 |---|---|---|
 | `Game` | Game, shared by every user | `igdbId` (unique), title, cover, genres, themes, modes, `timeToBeatHours` |
 | `UserGame` | Game in one user's library | `userId` (Clerk user ID), `gameId`, `sessionLength`. Unique on `(userId, gameId)` |
-| `Pick` | Time a user chose a suggestion | `userId`, `userGameId`, `availableTime` |
 
-Game metadata is stored once and shared. Everything personal (which games a user owns, their session tags, their picks) sits in rows that carry that user's ID, and every query filters on it. Deleting a library entry also deletes its picks. Row level security is enabled on all three tables, so the data is reachable only through this API.
+Game metadata is stored once and shared. Everything personal (which games a user owns and their session tags) sits in rows that carry that user's ID, and every query filters on it. Row level security is enabled on both tables, so the data is reachable only through this API.
 
 ## Getting started
 
@@ -168,7 +185,6 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/library` | Yes | The signed-in user's games | 200, 401 |
 | GET | `/api/library/:id` | Yes | One library entry, with its IGDB summary and the picker choices that can suggest it | 200, 401, 404 |
 | PATCH | `/api/library/:id` | Yes | Set or clear how long the user usually plays this game, body `{ "sessionLength": "SHORT" }` | 200, 400, 401, 404 |
-| POST | `/api/library/:id/picks` | Yes | Record that the user chose this suggestion, body `{ "availableTime": "UNDER_30" }` | 201, 400, 401, 404 |
 | POST | `/api/library` | Yes | Add a game, body `{ "igdbId": 113112 }` | 201, 400, 401, 404, 409, 502 |
 | DELETE | `/api/library/:id` | Yes | Remove a library entry | 204, 401, 404 |
 | GET | `/api/recommendations/options` | Yes | How many library games each picker type can suggest | 200, 401 |
@@ -210,9 +226,8 @@ Only games in the signed-in user's library are considered.
 IGDB has no data on how long a sitting lasts, so session length uses the best evidence available, in this order:
 
 1. The player's own tag on the game page ("Under an hour", "1 to 2 hours", "2+ hours"). A match is worth 2 points, and a tag that does not match means no time points at all.
-2. Earlier picks. If the player chose this game before with a similar amount of time, 1 point.
-3. Genres and themes, as a guess. Puzzle and racing games lean short, role-playing and strategy games lean long, and a shooter counts as short only when it has multiplayer. 1 point.
-4. The game's overall length from IGDB, used only when the genres say nothing. 1 point.
+2. Genres and themes, as a guess. Puzzle and racing games lean short, role-playing and strategy games lean long, and a shooter counts as short only when it has multiplayer. 1 point.
+3. The game's overall length from IGDB, used only when the genres say nothing. 1 point.
 - Games are sorted by points, ties are shuffled, and the top three are returned.
 
 ## Deployment

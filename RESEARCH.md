@@ -119,7 +119,7 @@ Yes. The typed client and migrations are worth the setup. Budget time for connec
 - The query language (Apicalypse) is sent as plain text in a POST body, so user input must be escaped by hand.
 - Cover art arrives as an image ID that has to be turned into a URL.
 - Fields are omitted when empty, so every field must be treated as optional during normalization.
-- There is no session-length data. A separate endpoint (`game_time_to_beats`) gives the hours needed to finish a game, which is not the same as one sitting. PlayState treats genre and time to beat as fallback guesses and lets the player's own tag and past picks override them.
+- There is no session-length data. A separate endpoint (`game_time_to_beats`) gives the hours needed to finish a game, which is not the same as one sitting. PlayState treats genre and time to beat as fallback guesses and lets the player's own tag override them.
 - Raw search results include DLC, season packs, bundles, and special editions. Filtering on `game_type` and `version_parent` removes them. The older `category` field is deprecated and matched nothing.
 - Unrelated games with the same name still appear, so the first result is not always the one a user expects.
 - Registering a Twitch application requires an OAuth redirect URL even though the client-credentials flow never uses one. `http://localhost` is enough.
