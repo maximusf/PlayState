@@ -23,7 +23,6 @@ export type LibraryEntry = {
   id: string;
   addedAt: string;
   sessionLength: SessionLength | null;
-  pickedFor: string[];
   game: {
     igdbId: number;
     title: string;

@@ -207,10 +207,6 @@ export function GameView({ id }: { id: string }) {
                 </h2>
                 <p className="mt-2 text-slate">
                   The picker uses your answer instead of guessing from the genre.
-                  {state.entry.pickedFor.length > 0 &&
-                    ` You have chosen this game ${state.entry.pickedFor.length} ${
-                      state.entry.pickedFor.length === 1 ? "time" : "times"
-                    } from the picker.`}
                 </p>
                 <div role="group" aria-label="Usual session length" className="mt-4 flex flex-wrap gap-2.5">
                   {SESSION_OPTIONS.map((option) => {

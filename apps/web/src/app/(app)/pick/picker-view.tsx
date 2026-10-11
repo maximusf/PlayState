@@ -76,7 +76,6 @@ export function PickerView() {
   const [mode, setMode] = useState<string>("EITHER");
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<Result>({ status: "idle" });
-  const [chosenId, setChosenId] = useState<string | null>(null);
   // Library entries already suggested for the current answers.
   const [seen, setSeen] = useState<string[]>([]);
   const questionRef = useRef<HTMLLegendElement>(null);
@@ -138,7 +137,6 @@ export function PickerView() {
   // "Pick again" passes the games already shown so the next three are different.
   async function findGames(exclude: string[] = []) {
     setResult({ status: "loading" });
-    setChosenId(null);
 
     try {
       const data = await api<{ recommendations: Recommendation[] }>("/api/recommendations", {
@@ -165,16 +163,6 @@ export function PickerView() {
   }
 
   // Short summary of each answer, in question order.
-  // Saves the choice so later picks can learn from it. The on-screen state
-  // does not wait for this, and a failure only means this pick is not remembered.
-  function choose(gameId: string) {
-    setChosenId(gameId);
-    api(`/api/library/${encodeURIComponent(gameId)}/picks`, {
-      method: "POST",
-      body: { availableTime: time },
-    }).catch(() => {});
-  }
-
   const answers = [
     TIMES.find((option) => option.value === time)?.label ?? "Any",
     types.length === 0 ? "Anything" : types.join(", "),
@@ -399,70 +387,45 @@ export function PickerView() {
 
         {games.length > 0 && (
           <ol className="grid gap-7 px-1 sm:grid-cols-2 lg:grid-cols-3">
-            {games.map((game, index) => {
-              const chosen = chosenId === game.id;
+            {games.map((game, index) => (
+              <li key={game.id} className="flex flex-col gap-4 bg-surface p-5 pixel-frame">
+                <div className="relative">
+                  <GameCover title={game.title} coverUrl={game.coverUrl} />
+                  <span className="absolute left-3 top-3 bg-emerald px-2 font-pixel text-xl leading-tight text-forest">
+                    PICK {index + 1}
+                  </span>
+                </div>
 
-              return (
-                <li
-                  key={game.id}
-                  className={`flex flex-col gap-4 p-5 pixel-frame ${
-                    chosen ? "bg-mint" : chosenId ? "bg-surface opacity-55" : "bg-surface"
-                  }`}
-                >
-                  <div className="relative">
-                    <GameCover title={game.title} coverUrl={game.coverUrl} />
-                    <span className="absolute left-3 top-3 bg-emerald px-2 font-pixel text-xl leading-tight text-forest">
-                      PICK {index + 1}
-                    </span>
-                  </div>
+                <div>
+                  <h2 className="text-2xl font-bold leading-snug text-forest">{game.title}</h2>
+                  <p className="mt-1 text-muted">{genreLine(game.genres, 3)}</p>
+                </div>
 
-                  <div>
-                    <h2 className="text-2xl font-bold leading-snug text-forest">{game.title}</h2>
-                    <p className="mt-1 text-muted">{genreLine(game.genres, 3)}</p>
-                  </div>
+                <div>
+                  <p className="pixel-label text-forest">Why this fits</p>
+                  <ul className="mt-2 space-y-1 text-slate">
+                    {game.reasons.map((reason) => (
+                      <li key={reason} className="flex gap-2">
+                        <span aria-hidden="true" className="font-bold text-pine">
+                          +
+                        </span>
+                        {reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
-                  <div>
-                    <p className="pixel-label text-forest">Why this fits</p>
-                    <ul className="mt-2 space-y-1 text-slate">
-                      {game.reasons.map((reason) => (
-                        <li key={reason} className="flex gap-2">
-                          <span aria-hidden="true" className="font-bold text-pine">
-                            +
-                          </span>
-                          {reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="mt-auto px-1 pt-2">
-                    {chosen ? (
-                      <p
-                        role="status"
-                        className="flex min-h-11 flex-wrap items-center justify-between gap-x-4 text-lg font-bold text-forest"
-                      >
-                        Locked in. Have fun.
-                        <Link
-                          href={`/library/${game.id}`}
-                          className="text-base font-semibold underline underline-offset-4 hover:no-underline"
-                        >
-                          View game
-                        </Link>
-                      </p>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => choose(game.id)}
-                        aria-label={`Choose ${game.title}`}
-                        className="btn btn-secondary w-full"
-                      >
-                        Choose this
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+                <div className="mt-auto px-1 pt-2">
+                  <Link
+                    href={`/library/${game.id}`}
+                    aria-label={`View ${game.title}`}
+                    className="btn btn-secondary w-full"
+                  >
+                    View game
+                  </Link>
+                </div>
+              </li>
+            ))}
           </ol>
         )}
       </section>
