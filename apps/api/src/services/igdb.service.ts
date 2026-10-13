@@ -193,10 +193,13 @@ function isPlayable(game: IgdbGame): boolean {
   return PLAYABLE_GAME_TYPES.includes(game.game_type ?? 0);
 }
 
-function batches<T>(items: T[]): T[][] {
-  const result: T[][] = [];
-  for (let start = 0; start < items.length; start += BATCH_SIZE) {
-    result.push(items.slice(start, start + BATCH_SIZE));
+// Splits IDs into request-sized groups. IDs are written straight into IGDB queries, so
+// anything that is not a plain positive whole number is dropped here, whatever its source.
+function batches(ids: number[]): number[][] {
+  const safe = ids.filter((id) => Number.isSafeInteger(id) && id > 0);
+  const result: number[][] = [];
+  for (let start = 0; start < safe.length; start += BATCH_SIZE) {
+    result.push(safe.slice(start, start + BATCH_SIZE));
   }
   return result;
 }
@@ -284,6 +287,38 @@ export async function getTimesToBeatHours(igdbIds: number[]): Promise<Map<number
   }
 
   return hours;
+}
+
+// The most players each game supports, across online, local and co-op play.
+// Games IGDB has no figure for are left out.
+export async function getMaxPlayers(igdbIds: number[]): Promise<Map<number, number>> {
+  const limits = new Map<number, number>();
+
+  for (const batch of batches(igdbIds)) {
+    const rows = await queryIgdb<{
+      game?: number;
+      onlinemax?: number;
+      onlinecoopmax?: number;
+      offlinemax?: number;
+      offlinecoopmax?: number;
+    }>(
+      "multiplayer_modes",
+      `fields game,onlinemax,onlinecoopmax,offlinemax,offlinecoopmax; where game = (${batch.join(",")}); limit 500;`,
+    );
+
+    // A game has one row per platform. The largest figure on any of them is used.
+    for (const row of rows) {
+      const most = Math.max(
+        row.onlinemax ?? 0,
+        row.onlinecoopmax ?? 0,
+        row.offlinemax ?? 0,
+        row.offlinecoopmax ?? 0,
+      );
+      if (row.game && most > 0) limits.set(row.game, Math.max(limits.get(row.game) ?? 0, most));
+    }
+  }
+
+  return limits;
 }
 
 // Finds the IGDB game behind each Steam app ID. Apps IGDB does not know, and apps that are

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, errorMessage, useApi, type Recommendation } from "@/lib/api";
 import { genreLine } from "@/lib/genres";
-import { EmptyState, GameCover, Notice, PixelLoader } from "@/components/ui";
+import { PickCardsSkeleton } from "@/components/skeletons";
+import { EmptyState, GameCover, Notice } from "@/components/ui";
 
 const TIMES = [
   { value: "UNDER_30", label: "Under 30 min" },
@@ -352,7 +353,7 @@ export function PickerView() {
       </div>
 
       <section className="mt-8" aria-live="polite">
-        {result.status === "loading" && <PixelLoader label="Finding games" />}
+        {result.status === "loading" && <PickCardsSkeleton label="Finding games" />}
 
         {result.status === "error" && <Notice tone="error">{result.message}</Notice>}
 

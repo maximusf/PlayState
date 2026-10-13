@@ -25,6 +25,9 @@ export async function SiteHeader() {
               <Link href="/pick" className={navLink}>
                 Pick
               </Link>
+              <Link href="/party" className={navLink}>
+                Party
+              </Link>
               <UserButton />
             </>
           ) : (

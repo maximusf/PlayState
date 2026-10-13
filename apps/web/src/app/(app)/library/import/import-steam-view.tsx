@@ -10,7 +10,8 @@ import {
   type SteamImportPreview,
 } from "@/lib/api";
 import { genreLine } from "@/lib/genres";
-import { GameCover, Notice, PixelLoader } from "@/components/ui";
+import { RowListSkeleton } from "@/components/skeletons";
+import { GameCover, Notice } from "@/components/ui";
 
 type State =
   | { status: "idle" }
@@ -287,7 +288,9 @@ export function ImportSteamView() {
           </form>
 
           <div className="mt-8" aria-live="polite">
-            {state.status === "loading" && <PixelLoader label="Reading your Steam library" />}
+            {state.status === "loading" && (
+              <RowListSkeleton label="Reading your Steam library" count={6} />
+            )}
 
             {state.status === "error" && <Notice tone="error">{state.message}</Notice>}
 

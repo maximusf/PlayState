@@ -32,6 +32,14 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
+  // express.json() refuses bodies over its 100 kB limit before any route runs.
+  if (err?.type === "entity.too.large") {
+    res.status(413).json({
+      error: { code: "VALIDATION_ERROR", message: "Request body is too large." },
+    });
+    return;
+  }
+
   console.error(err);
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Something went wrong." },

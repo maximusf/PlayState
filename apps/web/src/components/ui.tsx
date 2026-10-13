@@ -44,6 +44,38 @@ export function Notice({
   );
 }
 
+// A text input that shows how many characters are left, counting down inside its right edge.
+export function CountedInput({
+  value,
+  maxLength,
+  className = "",
+  ...props
+}: Omit<React.ComponentProps<"input">, "value" | "maxLength"> & {
+  value: string;
+  maxLength: number;
+}) {
+  const left = maxLength - value.length;
+
+  return (
+    <span className="relative block">
+      {/* The right padding keeps typed text from running under the count. */}
+      <input {...props} value={value} maxLength={maxLength} className={`${className} pr-12`} />
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm font-semibold tabular-nums ${
+          left <= 5 ? "text-danger" : "text-muted"
+        }`}
+      >
+        {left}
+      </span>
+      {/* Screen readers hear the count only once it is nearly used up, not on every key. */}
+      <span role="status" className="sr-only">
+        {left <= 5 ? `${left} characters left` : ""}
+      </span>
+    </span>
+  );
+}
+
 // Cover art, with a pixel placeholder when IGDB has none.
 export function GameCover({
   title,

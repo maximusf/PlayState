@@ -82,19 +82,21 @@ Route -> Controller -> Service -> Prisma or IGDB
 Three rules hold everywhere:
 
 - The user ID always comes from the verified Clerk session, never from the request body or URL.
-- Every library query is scoped to that user ID.
+- Every library query is scoped to that user ID. The one exception is a party, where members see only the multiplayer games they have in common.
 - IGDB and Twitch credentials exist only on the API server. The browser talks to PlayState, and PlayState talks to IGDB.
 
 ## Data model
 
-Two tables in PostgreSQL, managed by Prisma migrations.
+Four tables in PostgreSQL, managed by Prisma migrations.
 
 | Table | One row per | Key columns |
 |---|---|---|
 | `Game` | Game, shared by every user | `igdbId` (unique), title, cover, genres, themes, modes, `timeToBeatHours` |
 | `UserGame` | Game in one user's library | `userId` (Clerk user ID), `gameId`, `sessionLength`. Unique on `(userId, gameId)` |
+| `Party` | Group of players comparing libraries | `code` (unique, used in the invite link), `name`, `hostId` (Clerk user ID of the player who started it) |
+| `PartyMember` | Player in one party | `partyId`, `userId`, `displayName`. Unique on `(partyId, userId)` |
 
-Game metadata is stored once and shared. Everything personal (which games a user owns and their session tags) sits in rows that carry that user's ID, and every query filters on it. Row level security is enabled on both tables, so the data is reachable only through this API.
+Game metadata is stored once and shared. Everything personal (which games a user owns and their session tags) sits in rows that carry that user's ID, and every query filters on it. Row level security is enabled on every table, so the data is reachable only through this API.
 
 ## Getting started
 
@@ -194,6 +196,13 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | POST | `/api/library/import/steam` | Yes | Preview a Steam library, body `{ "profile": "https://steamcommunity.com/id/name" }`. Matches each Steam game to IGDB and flags the ones already owned. Saves nothing | 200, 400, 401, 404, 422, 502 |
 | POST | `/api/library/import` | Yes | Add many games at once, body `{ "igdbIds": [113112, 14593] }`. Games already in the library are skipped | 200, 400, 401, 502 |
 | DELETE | `/api/library/:id` | Yes | Remove a library entry | 204, 401, 404 |
+| GET | `/api/parties` | Yes | Parties the signed-in user is in | 200, 401 |
+| POST | `/api/parties` | Yes | Start a party that lasts one day, body `{ "name": "Friday night", "displayName": "Max" }`. A player can host three at once. Rate limited | 201, 400, 401, 409, 429 |
+| GET | `/api/parties/:code/invite` | Yes | A party's name and size, for someone deciding whether to join | 200, 401, 404 |
+| POST | `/api/parties/:code/members` | Yes | Join a party, body `{ "displayName": "Sam" }`. Rate limited | 200, 400, 401, 404, 409, 429 |
+| GET | `/api/parties/:code` | Members | The multiplayer games every member owns, and the ones a single member is missing, each with its player limit when IGDB has one | 200, 401, 403, 404 |
+| DELETE | `/api/parties/:code/members/me` | Yes | Leave a party. The host cannot leave | 204, 401, 404, 409 |
+| DELETE | `/api/parties/:code` | Host | End a party for everyone | 204, 401, 403, 404 |
 | GET | `/api/recommendations/options` | Yes | How many library games each picker type can suggest | 200, 401 |
 | POST | `/api/recommendations` | Yes | Up to three suggestions | 200, 400, 401 |
 
@@ -213,7 +222,7 @@ Recommendation request:
 - `gameMode`: `SINGLE_PLAYER`, `MULTIPLAYER`, `EITHER`
 - `exclude`: optional list of library entry IDs to leave out. The picker sends the games it has already shown, so "Pick again" returns different ones.
 
-Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `WEBHOOK_INVALID`, `INTERNAL_ERROR`.
+Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `WEBHOOK_INVALID`, `PARTY_NOT_FOUND`, `PARTY_NOT_JOINED`, `PARTY_FULL`, `PARTY_LIMIT_REACHED`, `PARTY_HOST_LIMIT`, `PARTY_NOT_HOST`, `PARTY_HOST_CANNOT_LEAVE`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
 Steam import uses Steam only to learn which games a profile owns. All game data still comes from IGDB, so an imported game and a game added by hand are the same record and cannot appear twice. Steam shares a library only when the profile's Game details privacy setting is Public.
 

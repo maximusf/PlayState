@@ -23,12 +23,22 @@ const db = vi.hoisted(() => ({
     deleteMany: vi.fn(),
   },
   game: { upsert: vi.fn(), update: vi.fn(), findMany: vi.fn(), createMany: vi.fn() },
+  party: {
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    count: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  partyMember: { count: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
 }));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
 
 import app from "../src/app";
 import { Prisma } from "../src/generated/prisma/client";
+import { resetRateLimits } from "../src/middleware/rate-limit.middleware";
 import { resetTokenCache } from "../src/services/igdb.service";
 
 const fetchMock = vi.fn();
@@ -69,6 +79,7 @@ const hadesEntry = {
 beforeEach(() => {
   vi.clearAllMocks();
   resetTokenCache();
+  resetRateLimits();
   process.env.TWITCH_CLIENT_ID = "test-client";
   process.env.TWITCH_CLIENT_SECRET = "test-secret";
   process.env.STEAM_API_KEY = "test-steam-key";
@@ -122,6 +133,9 @@ describe("POST /api/webhooks/clerk", () => {
 
     expect(res.status).toBe(200);
     expect(db.userGame.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_b" } });
+    // The parties they host end, and they are taken out of everyone else's.
+    expect(db.party.deleteMany).toHaveBeenCalledWith({ where: { hostId: "user_b" } });
+    expect(db.partyMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_b" } });
     // The signature is checked against the raw bytes, so the body must not be parsed first.
     expect(Buffer.isBuffer(verifyWebhook.mock.calls[0][0].body)).toBe(true);
   });
@@ -340,6 +354,34 @@ describe("GET /api/library/:id", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.summary).toBeNull();
     expect(res.body.data.game.title).toBe("Hades");
+  });
+});
+
+describe("oversized input", () => {
+  it("rejects an over-long library ID, search and Steam profile before doing any work", async () => {
+    const long = "x".repeat(300);
+    const responses = await Promise.all([
+      request(app).get(`/api/library/${long}`).set("x-test-user", "user_a"),
+      request(app).get("/api/catalog/search").query({ q: long }),
+      request(app).post("/api/library/import/steam").set("x-test-user", "user_a").send({ profile: long }),
+    ]);
+
+    for (const res of responses) {
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(db.userGame.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request body larger than the server accepts", async () => {
+    const res = await request(app)
+      .post("/api/parties")
+      .set("x-test-user", "user_a")
+      .send({ name: "x".repeat(200_000), displayName: "Max" });
+
+    expect(res.status).toBe(413);
+    expect(db.party.create).not.toHaveBeenCalled();
   });
 });
 
@@ -587,6 +629,28 @@ describe("POST /api/library/import/steam", () => {
     expect(db.userGame.createMany).not.toHaveBeenCalled();
   });
 
+  it("never passes a malformed Steam app ID into an IGDB query", async () => {
+    mockSteamAndIgdb({
+      steam: {
+        GetOwnedGames: {
+          games: [
+            { appid: 620, name: "Portal 2" },
+            { appid: '1"); fields *; where id = ("1', name: "Not a real app" },
+            { appid: 1.5, name: "Also not real" },
+          ],
+        },
+      },
+      igdb: { external_games: [] },
+    });
+    db.userGame.findMany.mockResolvedValue([]);
+
+    const res = await preview("76561197960287930");
+
+    expect(res.status).toBe(200);
+    expect(igdbBodies("external_games")).toHaveLength(1);
+    expect(igdbBodies("external_games")[0]).toContain('uid = ("620");');
+  });
+
   it("uses a numeric Steam ID directly", async () => {
     mockSteamAndIgdb({ steam: { GetOwnedGames: steamLibrary }, igdb: { external_games: [] } });
     db.userGame.findMany.mockResolvedValue([]);
@@ -799,6 +863,375 @@ describe("DELETE /api/library/:id", () => {
     expect(db.userGame.deleteMany).toHaveBeenCalledWith({
       where: { id: "entry_1", userId: "user_b" },
     });
+  });
+});
+
+describe("parties", () => {
+  const CODE = "abcDEF123_-x";
+  const member = (userId: string, displayName: string) => ({ partyId: "party_1", userId, displayName });
+  const party = (...members: ReturnType<typeof member>[]) => ({
+    id: "party_1",
+    code: CODE,
+    name: "Friday night",
+    // user_a started every party in these tests.
+    hostId: "user_a",
+    createdAt: new Date(),
+    members,
+  });
+  const game = (id: string, title: string, gameModes: string[]) => ({
+    id,
+    igdbId: Number(id.replace("game_", "")),
+    title,
+    coverUrl: null,
+    genres: ["Shooter"],
+    gameModes,
+  });
+  const owns = (userId: string, owned: ReturnType<typeof game>) => ({
+    id: `entry_${userId}_${owned.id}`,
+    userId,
+    gameId: owned.id,
+    game: owned,
+  });
+
+  it("requires authentication on every route", async () => {
+    const responses = await Promise.all([
+      request(app).get("/api/parties"),
+      request(app).post("/api/parties").send({ name: "x", displayName: "y" }),
+      request(app).get(`/api/parties/${CODE}`),
+      request(app).get(`/api/parties/${CODE}/invite`),
+      request(app).post(`/api/parties/${CODE}/members`).send({ displayName: "y" }),
+      request(app).delete(`/api/parties/${CODE}/members/me`),
+      request(app).delete(`/api/parties/${CODE}`),
+    ]);
+
+    for (const res of responses) expect(res.status).toBe(401);
+    expect(db.party.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("creates a party with an unguessable code and the creator as its first member", async () => {
+    db.party.count.mockResolvedValue(0);
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({
+      id: "party_1",
+      createdAt: new Date("2026-10-13T12:00:00Z"),
+      ...data,
+    }));
+
+    const res = await request(app)
+      .post("/api/parties")
+      .set("x-test-user", "user_a")
+      .send({ name: "  Friday night ", displayName: " Max ", userId: "user_b" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({
+      name: "Friday night",
+      memberCount: 1,
+      // A party lasts one day from when it was started.
+      expiresAt: "2026-10-14T12:00:00.000Z",
+    });
+    expect(res.body.data.code).toMatch(/^[A-Za-z0-9_-]{12}$/);
+    expect(db.party.create.mock.calls[0][0].data).toMatchObject({
+      hostId: "user_a",
+      members: { create: { userId: "user_a", displayName: "Max" } },
+    });
+    expect(res.body.data.isHost).toBe(true);
+  });
+
+  it("stops a player from hosting more than three parties at once", async () => {
+    db.party.count.mockResolvedValue(3);
+
+    const res = await request(app)
+      .post("/api/parties")
+      .set("x-test-user", "user_a")
+      .send({ name: "One too many", displayName: "Max" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("PARTY_HOST_LIMIT");
+    expect(db.party.count).toHaveBeenCalledWith({ where: { hostId: "user_a" } });
+    expect(db.party.create).not.toHaveBeenCalled();
+  });
+
+  it("rate limits party creation per player", async () => {
+    db.party.count.mockResolvedValue(0);
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({ id: "p", createdAt: new Date(), ...data }));
+    const start = (user: string) =>
+      request(app).post("/api/parties").set("x-test-user", user).send({ name: "Squad", displayName: "Max" });
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await start("user_a")).status).toBe(201);
+    }
+    const blocked = await start("user_a");
+    const someoneElse = await start("user_b");
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("RATE_LIMITED");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    // One player hitting the limit does not block another.
+    expect(someoneElse.status).toBe(201);
+    expect(db.party.create).toHaveBeenCalledTimes(6);
+  });
+
+  it("stores a name that looks like a database command as plain text", async () => {
+    db.party.count.mockResolvedValue(0);
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({ id: "p", createdAt: new Date(), ...data }));
+    const name = "'; DROP TABLE \"Party\"; --";
+    const displayName = "<b>Max</b>";
+
+    const res = await request(app)
+      .post("/api/parties")
+      .set("x-test-user", "user_a")
+      .send({ name, displayName });
+
+    // It is handed to the database as a value, exactly as typed. It is never part of a query.
+    expect(res.status).toBe(201);
+    expect(db.party.create.mock.calls[0][0].data).toMatchObject({
+      name,
+      members: { create: { userId: "user_a", displayName } },
+    });
+  });
+
+  it("tidies spacing in names and rejects control and text-direction characters", async () => {
+    db.party.count.mockResolvedValue(0);
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({ id: "p", createdAt: new Date(), ...data }));
+    const start = (name: string, displayName: string) => {
+      // This test is about names, so the creation limit is kept out of the way.
+      resetRateLimits();
+      return request(app).post("/api/parties").set("x-test-user", "user_a").send({ name, displayName });
+    };
+
+    const tidy = await start("  Friday    night  ", "Max");
+    expect(tidy.status).toBe(201);
+    expect(db.party.create.mock.calls[0][0].data.name).toBe("Friday night");
+
+    for (const bad of ["line\nbreak", "tab\tbed", "null\u0000byte", "flip\u202Edetrevni"]) {
+      const res = await start("Squad", bad);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    // Forty-one characters is one over the party name limit. A name of only spaces is empty.
+    expect((await start("x".repeat(41), "Max")).status).toBe(400);
+    expect((await start("     ", "Max")).status).toBe(400);
+    expect(db.party.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an invalid party or display name with 400", async () => {
+    for (const body of [{}, { name: "", displayName: "Max" }, { name: "Squad", displayName: "x".repeat(25) }]) {
+      const res = await request(app).post("/api/parties").set("x-test-user", "user_a").send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect(db.party.create).not.toHaveBeenCalled();
+  });
+
+  it("shows an invite's name and size, but no members or games, before joining", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+
+    const res = await request(app).get(`/api/parties/${CODE}/invite`).set("x-test-user", "user_c");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ code: CODE, name: "Friday night", memberCount: 2, joined: false });
+    expect(res.body.data.members).toBeUndefined();
+    expect(db.userGame.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a party that does not exist", async () => {
+    db.party.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get(`/api/parties/${CODE}/invite`).set("x-test-user", "user_a");
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("PARTY_NOT_FOUND");
+  });
+
+  it("treats a party older than a day as gone, and clears expired parties out", async () => {
+    const yesterday = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    db.party.findUnique.mockResolvedValue({ ...party(member("user_a", "Max")), createdAt: yesterday });
+    db.party.findMany.mockResolvedValue([]);
+
+    const expired = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_a");
+    await request(app).get("/api/parties").set("x-test-user", "user_a");
+
+    expect(expired.status).toBe(404);
+    expect(expired.body.error.code).toBe("PARTY_NOT_FOUND");
+    expect(db.userGame.findMany).not.toHaveBeenCalled();
+
+    const cutoff = db.party.deleteMany.mock.calls[0][0].where.createdAt.lt as Date;
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    expect(Math.abs(cutoff.getTime() - dayAgo)).toBeLessThan(5000);
+  });
+
+  it("joins a party as the signed-in user", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max")));
+    db.partyMember.count.mockResolvedValue(0);
+
+    const res = await request(app)
+      .post(`/api/parties/${CODE}/members`)
+      .set("x-test-user", "user_b")
+      .send({ displayName: "Sam", userId: "user_z" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.memberCount).toBe(2);
+    expect(db.partyMember.upsert).toHaveBeenCalledWith({
+      where: { partyId_userId: { partyId: "party_1", userId: "user_b" } },
+      create: { partyId: "party_1", userId: "user_b", displayName: "Sam" },
+      update: { displayName: "Sam" },
+    });
+  });
+
+  it("refuses a new member when the party is full", async () => {
+    const twelve = Array.from({ length: 12 }, (_, index) => member(`user_${index}`, `P${index}`));
+    db.party.findUnique.mockResolvedValue(party(...twelve));
+
+    const res = await request(app)
+      .post(`/api/parties/${CODE}/members`)
+      .set("x-test-user", "user_new")
+      .send({ displayName: "Late" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("PARTY_FULL");
+    expect(db.partyMember.upsert).not.toHaveBeenCalled();
+  });
+
+  it("hides a party's members and games from someone who has not joined", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+
+    const res = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_c");
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("PARTY_NOT_JOINED");
+    expect(db.userGame.findMany).not.toHaveBeenCalled();
+  });
+
+  it("lists the multiplayer games everyone owns, and the ones one player is missing", async () => {
+    const halo = game("game_1", "Halo Infinite", ["Single player", "Multiplayer"]);
+    const portal = game("game_2", "Portal 2", ["Single player", "Co-operative"]);
+    const hades = game("game_3", "Hades", ["Single player"]);
+    const rocket = game("game_4", "Rocket League", ["Multiplayer"]);
+
+    db.party.findUnique.mockResolvedValue(
+      party(member("user_a", "Max"), member("user_b", "Sam"), member("user_c", "Rio")),
+    );
+    db.userGame.findMany.mockResolvedValue([
+      // Everyone owns Halo and Hades. Rio lacks Portal 2. Only Max owns Rocket League.
+      owns("user_a", halo), owns("user_b", halo), owns("user_c", halo),
+      owns("user_a", hades), owns("user_b", hades), owns("user_c", hades),
+      owns("user_a", portal), owns("user_b", portal),
+      owns("user_a", rocket),
+    ]);
+
+    // IGDB has a player limit for Halo and nothing for Portal 2.
+    mockSteamAndIgdb({
+      igdb: {
+        multiplayer_modes: [
+          { game: 1, onlinemax: 24, offlinemax: 2 },
+          { game: 1, onlinemax: 12 },
+        ],
+      },
+    });
+
+    const res = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(igdbBodies("multiplayer_modes")[0]).toContain("where game = (1,2);");
+    expect(db.userGame.findMany.mock.calls[0][0].where).toEqual({
+      userId: { in: ["user_a", "user_b", "user_c"] },
+    });
+    // Hades is owned by all three but is single-player only, so it is left out.
+    expect(res.body.data.shared).toEqual([
+      expect.objectContaining({
+        title: "Halo Infinite",
+        libraryEntryId: "entry_user_a_game_1",
+        // The largest figure across platforms.
+        maxPlayers: 24,
+      }),
+    ]);
+    expect(res.body.data.almost).toEqual([
+      expect.objectContaining({ title: "Portal 2", missing: "Rio", maxPlayers: null }),
+    ]);
+    expect(res.body.data.members).toEqual([
+      { displayName: "Max", isYou: true, isHost: true },
+      { displayName: "Sam", isYou: false, isHost: false },
+      { displayName: "Rio", isYou: false, isHost: false },
+    ]);
+    expect(res.body.data.isHost).toBe(true);
+    // Members know each other by display name only.
+    expect(JSON.stringify(res.body)).not.toContain("user_b");
+  });
+
+  it("still lists the shared games when IGDB cannot be reached for player limits", async () => {
+    const halo = game("game_1", "Halo Infinite", ["Multiplayer"]);
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+    db.userGame.findMany.mockResolvedValue([owns("user_a", halo), owns("user_b", halo)]);
+    fetchMock.mockRejectedValue(new Error("network down"));
+
+    const res = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.shared).toEqual([
+      expect.objectContaining({ title: "Halo Infinite", maxPlayers: null }),
+    ]);
+  });
+
+  it("does not list near misses for a party of two", async () => {
+    const halo = game("game_1", "Halo Infinite", ["Multiplayer"]);
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+    db.userGame.findMany.mockResolvedValue([owns("user_a", halo)]);
+
+    const res = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_a");
+
+    expect(res.body.data.shared).toEqual([]);
+    expect(res.body.data.almost).toEqual([]);
+  });
+
+  it("lets a member leave without ending the party", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+    db.partyMember.deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    const left = await request(app)
+      .delete(`/api/parties/${CODE}/members/me`)
+      .set("x-test-user", "user_b");
+    const stranger = await request(app)
+      .delete(`/api/parties/${CODE}/members/me`)
+      .set("x-test-user", "user_c");
+
+    expect(left.status).toBe(204);
+    expect(db.partyMember.deleteMany).toHaveBeenCalledWith({
+      where: { partyId: "party_1", userId: "user_b" },
+    });
+    expect(stranger.status).toBe(404);
+    expect(db.party.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not let the host leave their own party", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+
+    const res = await request(app)
+      .delete(`/api/parties/${CODE}/members/me`)
+      .set("x-test-user", "user_a");
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("PARTY_HOST_CANNOT_LEAVE");
+    expect(db.partyMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("lets the host end the party for everyone, and nobody else", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+
+    const member2 = await request(app).delete(`/api/parties/${CODE}`).set("x-test-user", "user_b");
+
+    expect(member2.status).toBe(403);
+    expect(member2.body.error.code).toBe("PARTY_NOT_HOST");
+    expect(db.party.delete).not.toHaveBeenCalled();
+
+    const host = await request(app).delete(`/api/parties/${CODE}`).set("x-test-user", "user_a");
+
+    expect(host.status).toBe(204);
+    expect(db.party.delete).toHaveBeenCalledWith({ where: { id: "party_1" } });
   });
 });
 
