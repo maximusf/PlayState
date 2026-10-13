@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   add,
+  count,
   detail,
   importMany,
   list,
@@ -15,6 +16,8 @@ const router = Router();
 router.use(requireUser);
 
 router.get("/", list);
+// Listed before "/:id" so "count" is not read as a library item ID.
+router.get("/count", count);
 router.get("/:id", detail);
 router.post("/", add);
 router.post("/import", importMany);

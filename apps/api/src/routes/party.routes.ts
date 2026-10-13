@@ -9,6 +9,8 @@ import {
   list,
   remove,
   rename,
+  roll,
+  version,
 } from "../controllers/party.controller";
 import { requireUser } from "../middleware/auth.middleware";
 import { rateLimit } from "../middleware/rate-limit.middleware";
@@ -25,6 +27,11 @@ const createLimit = rateLimit({
   max: 5,
   message: "You are starting parties too quickly. Wait a few minutes and try again.",
 });
+const rollLimit = rateLimit({
+  windowMs: TEN_MINUTES,
+  max: 120,
+  message: "You are rolling too quickly. Wait a few minutes and try again.",
+});
 const joinLimit = rateLimit({
   windowMs: TEN_MINUTES,
   max: 30,
@@ -37,6 +44,8 @@ router.get("/:code", detail);
 router.patch("/:code", rename);
 router.delete("/:code", end);
 router.get("/:code/invite", invite);
+router.get("/:code/version", version);
+router.post("/:code/roll", rollLimit, roll);
 router.post("/:code/members", joinLimit, join);
 // "me" is matched before a member ID, so a player leaving is never read as a removal.
 router.delete("/:code/members/me", leave);

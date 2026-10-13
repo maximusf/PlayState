@@ -219,7 +219,9 @@ async function queryGamesByIds(igdbIds: number[]): Promise<IgdbGame[]> {
   return games;
 }
 
+// Clears everything this service remembers between requests. Used by tests.
 export function resetTokenCache(): void {
+  maxPlayersCache.clear();
   cachedToken = null;
 }
 
@@ -289,12 +291,31 @@ export async function getTimesToBeatHours(igdbIds: number[]): Promise<Map<number
   return hours;
 }
 
+// Player limits change rarely and a party page asks for them often, so they are remembered.
+// A null means IGDB was asked and had no figure.
+const MAX_PLAYERS_TTL_MS = 12 * 60 * 60 * 1000;
+const maxPlayersCache = new Map<number, { limit: number | null; at: number }>();
+
 // The most players each game supports, across online, local and co-op play.
 // Games IGDB has no figure for are left out.
 export async function getMaxPlayers(igdbIds: number[]): Promise<Map<number, number>> {
   const limits = new Map<number, number>();
+  const now = Date.now();
+  const unknown: number[] = [];
 
-  for (const batch of batches(igdbIds)) {
+  for (const igdbId of igdbIds) {
+    const cached = maxPlayersCache.get(igdbId);
+
+    if (cached && now - cached.at < MAX_PLAYERS_TTL_MS) {
+      if (cached.limit !== null) limits.set(igdbId, cached.limit);
+    } else {
+      unknown.push(igdbId);
+    }
+  }
+
+  const fetched = new Map<number, number>();
+
+  for (const batch of batches(unknown)) {
     const rows = await queryIgdb<{
       game?: number;
       onlinemax?: number;
@@ -314,8 +335,15 @@ export async function getMaxPlayers(igdbIds: number[]): Promise<Map<number, numb
         row.offlinemax ?? 0,
         row.offlinecoopmax ?? 0,
       );
-      if (row.game && most > 0) limits.set(row.game, Math.max(limits.get(row.game) ?? 0, most));
+      if (row.game && most > 0) fetched.set(row.game, Math.max(fetched.get(row.game) ?? 0, most));
     }
+  }
+
+  // Remembered only after every request succeeded, so a failure is retried next time.
+  for (const igdbId of unknown) {
+    const limit = fetched.get(igdbId) ?? null;
+    maxPlayersCache.set(igdbId, { limit, at: now });
+    if (limit !== null) limits.set(igdbId, limit);
   }
 
   return limits;

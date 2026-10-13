@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { errorMessage, useApi, type LibraryEntry } from "@/lib/api";
 import { genreLine, shortGenre } from "@/lib/genres";
 import { PixelIcon, type PixelIconName } from "@/components/pixel-icons";
+import { RandomDiceLink } from "@/components/random-dice-link";
 import { CoverGridSkeleton, RowListSkeleton } from "@/components/skeletons";
 import { EmptyState, GameCover, Notice } from "@/components/ui";
 
@@ -258,6 +259,7 @@ export function LibraryView() {
         </div>
         {count > 0 && (
           <div className="flex flex-wrap gap-5 px-1 pb-3">
+            <RandomDiceLink count={count} />
             <Link href="/library/add" className="btn btn-secondary">
               Add a game
             </Link>

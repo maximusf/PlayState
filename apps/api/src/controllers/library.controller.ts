@@ -9,6 +9,7 @@ import {
 } from "../schemas/library.schema";
 import {
   addGameToLibrary,
+  countLibrary,
   getLibraryEntry,
   importGames,
   listLibrary,
@@ -21,6 +22,10 @@ export async function list(_req: Request, res: Response) {
   const entries = await listLibrary(getUserId(res));
 
   res.status(200).json({ data: entries });
+}
+
+export async function count(_req: Request, res: Response) {
+  res.status(200).json({ data: { count: await countLibrary(getUserId(res)) } });
 }
 
 export async function detail(req: Request, res: Response) {

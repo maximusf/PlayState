@@ -41,6 +41,13 @@ export const JoinPartySchema = z.object({ displayName });
 
 export const RenamePartySchema = z.object({ name: nameField("Party name", MAX_PARTY_NAME) });
 
+export const RollSchema = z.object({
+  igdbId: z
+    .number({ error: "igdbId must be a number." })
+    .int("igdbId must be a whole number.")
+    .positive("igdbId must be positive."),
+});
+
 export const PartyMemberParamSchema = z.object({
   memberId: z
     .string()

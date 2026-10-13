@@ -190,6 +190,7 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/catalog/search?q=` | No | Search IGDB by title (2 to 100 characters) | 200, 400, 502 |
 | GET | `/api/catalog/games/:igdbId` | No | Details for one game | 200, 400, 404, 502 |
 | GET | `/api/library` | Yes | The signed-in user's games | 200, 401 |
+| GET | `/api/library/count` | Yes | How many games the signed-in user has | 200, 401 |
 | GET | `/api/library/:id` | Yes | One library entry, with its IGDB summary and the picker choices that can suggest it | 200, 401, 404 |
 | PATCH | `/api/library/:id` | Yes | Set or clear how long the user usually plays this game, body `{ "sessionLength": "SHORT" }` | 200, 400, 401, 404 |
 | POST | `/api/library` | Yes | Add a game, body `{ "igdbId": 113112 }` | 201, 400, 401, 404, 409, 502 |
@@ -201,6 +202,8 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/parties/:code/invite` | Yes | A party's name and size, for someone deciding whether to join | 200, 401, 404 |
 | POST | `/api/parties/:code/members` | Yes | Join a party, body `{ "displayName": "Sam" }`. Rate limited | 200, 400, 401, 404, 409, 429 |
 | GET | `/api/parties/:code` | Members | The multiplayer games every member owns and the ones a single member is missing, each with its player limit when IGDB has one, plus the viewer's own remaining multiplayer games | 200, 401, 403, 404 |
+| GET | `/api/parties/:code/version` | Members | A short value that changes when the party does. The party page polls it to stay current | 200, 401, 403, 404 |
+| POST | `/api/parties/:code/roll` | Host | Save the game the host's dice landed on, body `{ "igdbId": 113112 }`, so every member sees it. Rate limited | 200, 400, 401, 403, 404, 409, 429 |
 | DELETE | `/api/parties/:code/members/me` | Yes | Leave a party. When the host leaves, the longest-standing member becomes host, and a host who is alone ends the party | 204, 401, 404 |
 | PATCH | `/api/parties/:code` | Host | Rename a party, body `{ "name": "Saturday night" }` | 200, 400, 401, 403, 404 |
 | DELETE | `/api/parties/:code/members/:memberId` | Host | Remove a player, who can then no longer rejoin with the link | 204, 401, 403, 404, 409 |
@@ -224,7 +227,7 @@ Recommendation request:
 - `gameMode`: `SINGLE_PLAYER`, `MULTIPLAYER`, `EITHER`
 - `exclude`: optional list of library entry IDs to leave out. The picker sends the games it has already shown, so "Pick again" returns different ones.
 
-Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `WEBHOOK_INVALID`, `PARTY_NOT_FOUND`, `PARTY_NOT_JOINED`, `PARTY_FULL`, `PARTY_LIMIT_REACHED`, `PARTY_NOT_HOST`, `PARTY_HOST_CANNOT_LEAVE`, `PARTY_MEMBER_NOT_FOUND`, `PARTY_REMOVED`, `RATE_LIMITED`, `INTERNAL_ERROR`.
+Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `WEBHOOK_INVALID`, `PARTY_NOT_FOUND`, `PARTY_NOT_JOINED`, `PARTY_FULL`, `PARTY_LIMIT_REACHED`, `PARTY_NOT_HOST`, `PARTY_HOST_CANNOT_LEAVE`, `PARTY_MEMBER_NOT_FOUND`, `PARTY_REMOVED`, `PARTY_GAME_NOT_SHARED`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
 Steam import uses Steam only to learn which games a profile owns. All game data still comes from IGDB, so an imported game and a game added by hand are the same record and cannot appear twice. Steam shares a library only when the profile's Game details privacy setting is Public.
 

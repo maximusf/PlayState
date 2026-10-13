@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { AppError } from "../lib/errors";
 import { prisma } from "../lib/prisma";
 import { getMaxPlayers } from "./igdb.service";
@@ -45,7 +45,14 @@ export type PartyDetail = PartySummary & {
   almost: (PartyGame & { missing: string; missingIsYou: boolean })[];
   // The viewer's own multiplayer games that fit neither list. Only ever their own library.
   others: PartyGame[];
+  // The host's latest dice roll, so every member sees the same result.
+  rolledIgdbId: number | null;
+  rolledAt: string | null;
+  // Changes whenever the party does. The page checks it to know when to reload.
+  version: string;
 };
+
+export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
 
 function expiresAt(party: { createdAt: Date }): Date {
   return new Date(party.createdAt.getTime() + PARTY_LIFETIME_MS);
@@ -57,6 +64,35 @@ async function deleteExpiredParties(): Promise<void> {
   await prisma.party.deleteMany({
     where: { createdAt: { lt: new Date(Date.now() - PARTY_LIFETIME_MS) } },
   });
+}
+
+type VersionedParty = {
+  name: string;
+  hostId: string;
+  rolledIgdbId: number | null;
+  rolledAt: Date | null;
+  members: { id: string; displayName: string }[];
+};
+
+// A short fingerprint of everything members can see change: the name, the host,
+// who is in the party, and the latest roll.
+function versionOf(party: VersionedParty): string {
+  const visible = [
+    party.name,
+    party.hostId,
+    party.rolledIgdbId,
+    party.rolledAt?.getTime() ?? null,
+    party.members.map((member) => [member.id, member.displayName]),
+  ];
+
+  return createHash("sha256").update(JSON.stringify(visible)).digest("base64url").slice(0, 16);
+}
+
+function requireMember(party: { members: { userId: string }[] }, userId: string): void {
+  // Only members may see who is in a party and what they own in common.
+  if (!party.members.some((member) => member.userId === userId)) {
+    throw new AppError(403, "PARTY_NOT_JOINED", "Join this party to see its games.");
+  }
 }
 
 function notFound(): AppError {
@@ -186,11 +222,7 @@ export async function joinParty(
 
 export async function getParty(userId: string, code: string): Promise<PartyDetail> {
   const party = await findParty(code);
-
-  // Only members may see who is in a party and what they own in common.
-  if (!party.members.some((member) => member.userId === userId)) {
-    throw new AppError(403, "PARTY_NOT_JOINED", "Join this party to see its games.");
-  }
+  requireMember(party, userId);
 
   const memberIds = party.members.map((member) => member.userId);
   const entries = await prisma.userGame.findMany({
@@ -270,6 +302,50 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     shared: shared.sort(byTitle),
     almost: almost.sort(byTitle),
     others: others.sort(byTitle),
+    rolledIgdbId: party.rolledIgdbId,
+    rolledAt: party.rolledAt?.toISOString() ?? null,
+    version: versionOf(party),
+  };
+}
+
+// A cheap check the party page makes every few seconds. It reads one party and no libraries.
+export async function getPartyVersion(userId: string, code: string): Promise<{ version: string }> {
+  const party = await findParty(code);
+  requireMember(party, userId);
+
+  return { version: versionOf(party) };
+}
+
+// Records the game the host's dice landed on, so every member sees the same result.
+export async function recordRoll(userId: string, code: string, igdbId: number): Promise<PartyRoll> {
+  const party = await findParty(code);
+  requireHost(party, userId, "roll the dice");
+
+  // The game must be one every member owns and can play together. The host's browser
+  // chose it, so it is checked here and not taken on trust.
+  const memberIds = party.members.map((member) => member.userId);
+  const owned = await prisma.userGame.findMany({
+    where: { userId: { in: memberIds }, game: { igdbId } },
+    include: { game: true },
+  });
+  const owners = new Set(owned.map((entry) => entry.userId));
+  const multiplayer = owned.some((entry) => hasAny(entry.game.gameModes, MULTIPLAYER_MODES));
+
+  if (owners.size !== memberIds.length || !multiplayer) {
+    throw new AppError(
+      409,
+      "PARTY_GAME_NOT_SHARED",
+      "That game is not one everyone in the party owns. Reload the party and roll again.",
+    );
+  }
+
+  const rolledAt = new Date();
+  await prisma.party.update({ where: { id: party.id }, data: { rolledIgdbId: igdbId, rolledAt } });
+
+  return {
+    rolledIgdbId: igdbId,
+    rolledAt: rolledAt.toISOString(),
+    version: versionOf({ ...party, rolledIgdbId: igdbId, rolledAt }),
   };
 }
 

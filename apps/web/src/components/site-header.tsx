@@ -11,19 +11,23 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b-4 border-forest bg-surface">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      {/* Four links and the logo do not fit on one line on a phone, so the links may wrap below it. */}
+      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3 sm:px-6">
         <Link href="/" aria-label="PlayState home">
           <Logo />
         </Link>
 
-        <nav aria-label="Main" className="flex items-center gap-1 sm:gap-3">
+        <nav aria-label="Main" className="flex flex-wrap items-center justify-end gap-x-1 sm:gap-x-3">
           {userId ? (
             <>
-              <Link href="/library" className={navLink}>
-                Library
+              <Link href="/random" className={navLink}>
+                Random
               </Link>
               <Link href="/pick" className={navLink}>
                 Pick
+              </Link>
+              <Link href="/library" className={navLink}>
+                Library
               </Link>
               <Link href="/party" className={navLink}>
                 Party
