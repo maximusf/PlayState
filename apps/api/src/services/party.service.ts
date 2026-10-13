@@ -42,7 +42,9 @@ export type PartyDetail = PartySummary & {
   // Multiplayer games every member owns. libraryEntryId is the viewer's own entry.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // Multiplayer games all but one member owns, and who is missing each.
-  almost: (PartyGame & { missing: string })[];
+  almost: (PartyGame & { missing: string; missingIsYou: boolean })[];
+  // The viewer's own multiplayer games that fit neither list. Only ever their own library.
+  others: PartyGame[];
 };
 
 function expiresAt(party: { createdAt: Date }): Date {
@@ -212,6 +214,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
 
   const shared: PartyDetail["shared"] = [];
   const almost: PartyDetail["almost"] = [];
+  const others: PartyDetail["others"] = [];
 
   for (const [gameId, { game, userIds }] of owners) {
     const summary = {
@@ -228,7 +231,16 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     } else if (memberIds.length >= 3 && userIds.size === memberIds.length - 1) {
       // With two players, "all but one" would just be each person's own library.
       const missing = party.members.find((member) => !userIds.has(member.userId));
-      if (missing) almost.push({ ...summary, missing: missing.displayName });
+      if (missing) {
+        almost.push({
+          ...summary,
+          missing: missing.displayName,
+          missingIsYou: missing.userId === userId,
+        });
+      }
+    } else if (userIds.has(userId)) {
+      // A game of the viewer's own. Other members' unshared games are never listed.
+      others.push(summary);
     }
   }
 
@@ -257,6 +269,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     })),
     shared: shared.sort(byTitle),
     almost: almost.sort(byTitle),
+    others: others.sort(byTitle),
   };
 }
 

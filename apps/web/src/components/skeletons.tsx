@@ -166,7 +166,7 @@ export function PartySkeleton({ label }: { label: string }) {
       </div>
       <Line className="mt-10 h-8 w-56" />
       <div className="mt-6">
-        <CoverGrid variant="grid" count={5} />
+        <CoverGrid variant="compact" count={8} />
       </div>
     </Skeleton>
   );

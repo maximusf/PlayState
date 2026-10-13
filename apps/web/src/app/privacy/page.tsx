@@ -30,7 +30,8 @@ const SECTIONS: { title: string; body: React.ReactNode }[] = [
     body: (
       <>
         When you join a party, its other members see the name you chose and the multiplayer games
-        you all have in common, plus the games only one member is missing. They never see the rest
+        you all have in common, plus the games only one member is missing. Your other games are
+        shown only to you. Other members never see the rest
         of your library, your email, or your account ID. Leaving a party, or being removed by its host, takes you out of it. A
         party is deleted when its host ends it or its last player leaves, and otherwise one day after it
         was started.

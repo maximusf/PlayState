@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   errorMessage,
@@ -10,7 +10,7 @@ import {
   type PartyDetail,
   type PartyInvite,
 } from "@/lib/api";
-import { genreLine } from "@/lib/genres";
+import { PixelIcon } from "@/components/pixel-icons";
 import { PartySkeleton } from "@/components/skeletons";
 import { CountedInput, EmptyState, GameCover, Notice } from "@/components/ui";
 import { expires, players } from "../parties-view";
@@ -24,15 +24,12 @@ type State =
 
 const backLink =
   "inline-flex min-h-11 items-center font-semibold text-forest underline underline-offset-4 hover:no-underline";
-const coverLift =
-  "transition duration-200 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)] group-focus-visible:-translate-y-1 group-focus-visible:shadow-[0_8px_0_0_var(--color-forest)]";
 const dangerLink =
   "min-h-11 cursor-pointer px-2 font-semibold text-danger underline underline-offset-4 hover:no-underline disabled:opacity-60";
 const plainLink =
   "min-h-11 cursor-pointer font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60";
 const chipButton =
   "min-h-11 cursor-pointer underline underline-offset-4 hover:no-underline disabled:opacity-60";
-const row = "flex items-center gap-4 bg-surface p-3 pixel-frame [--frame:var(--color-fern)]";
 
 // IGDB marks some games with a placeholder for "no real limit". Those show no limit at all.
 const NO_REAL_LIMIT = 100;
@@ -41,125 +38,188 @@ function playerLimit(maxPlayers: number | null): string | null {
   return maxPlayers === null || maxPlayers >= NO_REAL_LIMIT ? null : `Up to ${players(maxPlayers)}`;
 }
 
-function GameRow({
-  game,
-  note,
-}: {
-  game: { title: string; coverUrl: string | null; genres: string[] };
-  note: string;
-}) {
-  return (
-    <li className={row}>
-      <GameCover title={game.title} coverUrl={game.coverUrl} className="w-12 shrink-0" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-lg font-bold leading-snug text-forest">
-          {game.title}
-        </span>
-        <span className="block truncate text-sm text-muted">{genreLine(game.genres, 3)}</span>
-      </span>
-      <span className="shrink-0 text-right text-sm font-semibold text-forest">{note}</span>
-    </li>
-  );
-}
+type Tile = {
+  igdbId: number;
+  title: string;
+  coverUrl: string | null;
+  // True for a game the whole party owns and can fit in. Everything else is greyed out.
+  playable: boolean;
+  note: string | null;
+};
+
+// How long the dice keeps hopping between covers before it settles, and how fast.
+const ROLL_HOPS = 14;
+const ROLL_HOP_MS = 90;
 
 function PartyGames({ party }: { party: PartyDetail }) {
   const alone = party.memberCount === 1;
-  // A game whose limit is unknown is kept in the main list. Only a known, too-low limit moves it.
-  const fits = party.shared.filter(
-    (game) => game.maxPlayers === null || game.maxPlayers >= party.memberCount,
-  );
-  const tooSmall = party.shared.filter(
-    (game) => game.maxPlayers !== null && game.maxPlayers < party.memberCount,
-  );
+  const [rolledId, setRolledId] = useState<number | null>(null);
+  const [rolling, setRolling] = useState(false);
+  const [ignoreLimits, setIgnoreLimits] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  // A game whose player limit is unknown counts as playable. Only a known, too-low limit rules
+  // it out, and the party can choose to ignore limits, since they are sometimes wrong and a
+  // mod can raise them.
+  const tooSmall = (game: { maxPlayers: number | null }) =>
+    game.maxPlayers !== null && game.maxPlayers < party.memberCount;
+  const overLimit = party.shared.filter(tooSmall);
+
+  const tiles: Tile[] = [
+    ...party.shared
+      .filter((game) => ignoreLimits || !tooSmall(game))
+      .map((game) => ({ ...game, playable: true, note: playerLimit(game.maxPlayers) })),
+    ...party.shared
+      .filter((game) => !ignoreLimits && tooSmall(game))
+      .map((game) => ({ ...game, playable: false, note: playerLimit(game.maxPlayers) })),
+    ...party.almost.map((game) => ({
+      ...game,
+      playable: false,
+      note: game.missingIsYou ? "You need this one" : `${game.missing} needs this one`,
+    })),
+    ...party.others.map((game) => ({ ...game, playable: false, note: null })),
+  ];
+  const playable = tiles.filter((tile) => tile.playable);
+  const rolled = playable.find((tile) => tile.igdbId === rolledId) ?? null;
+
+  function roll() {
+    const pick = () => playable[Math.floor(Math.random() * playable.length)].igdbId;
+
+    // No hopping for players who have asked their device for less motion.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setRolledId(pick());
+      return;
+    }
+
+    setRolling(true);
+    let hops = 0;
+
+    const hop = () => {
+      setRolledId(pick());
+      hops += 1;
+
+      if (hops < ROLL_HOPS) {
+        timer.current = setTimeout(hop, ROLL_HOP_MS);
+      } else {
+        setRolling(false);
+      }
+    };
+
+    hop();
+  }
 
   return (
-    <>
-      <section className="mt-10">
-        <h2 className="font-pixel text-4xl leading-none text-forest">
-          {alone ? "Your multiplayer games" : "Everyone owns"}
-        </h2>
-        <p className="mt-2 text-muted">
-          {alone
-            ? "Send the invite link to a friend to see which of these you share."
-            : `Multiplayer games in all ${party.memberCount} libraries.`}
-        </p>
-
-        {fits.length === 0 ? (
-          <div className="mt-5">
-            <Notice tone="info">
-              {alone
-                ? "You have no multiplayer games in your library yet."
-                : tooSmall.length > 0
-                  ? "Every game you all own is too small for this group. They are listed below."
-                  : "No multiplayer game is in every library yet. Adding or importing more games may turn some up."}
-            </Notice>
-          </div>
-        ) : (
-          <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-8 px-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {fits.map((game) => {
-              const limit = playerLimit(game.maxPlayers);
-              const card = (
-                <>
-                  <span
-                    className={`relative block ring-4 ring-forest group-hover:ring-emerald group-focus-visible:ring-emerald ${coverLift}`}
-                  >
-                    <GameCover title={game.title} coverUrl={game.coverUrl} />
-                  </span>
-                  <span>
-                    <span className="block text-lg font-bold leading-snug text-forest">
-                      {game.title}
-                    </span>
-                    <span className="block text-sm text-muted">{genreLine(game.genres)}</span>
-                    {limit && <span className="block text-sm text-muted">{limit}</span>}
-                  </span>
-                </>
-              );
-
-              return (
-                <li key={game.igdbId}>
-                  {game.libraryEntryId ? (
-                    <Link
-                      href={`/library/${game.libraryEntryId}`}
-                      className="group flex flex-col gap-3 outline-offset-8"
-                    >
-                      {card}
-                    </Link>
-                  ) : (
-                    <div className="flex flex-col gap-3">{card}</div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {tooSmall.length > 0 && (
-        <section className="mt-12">
-          <h2 className="font-pixel text-4xl leading-none text-forest">Too small for this group</h2>
+    <section className="mt-10">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div>
+          <h2 className="font-pixel text-4xl leading-none text-forest">
+            {alone ? "Your multiplayer games" : "Games"}
+          </h2>
           <p className="mt-2 text-muted">
-            Everyone owns these, but they hold fewer than {players(party.memberCount)}.
+            {alone
+              ? "Send the invite link to a friend to see which of these you share."
+              : `In colour: everyone owns it. Greyed out: not everyone does, or it holds fewer than ${players(party.memberCount)}.`}
           </p>
-          <ul className="mt-6 space-y-4 px-1">
-            {tooSmall.map((game) => (
-              <GameRow key={game.igdbId} game={game} note={playerLimit(game.maxPlayers) ?? ""} />
-            ))}
-          </ul>
-        </section>
+        </div>
+        {playable.length > 1 && (
+          <div className="px-1 pb-3">
+            <button type="button" onClick={roll} disabled={rolling} className="btn btn-primary">
+              <PixelIcon name="dice" className="size-5" />
+              {rolling ? "Rolling" : rolled ? "Roll again" : "Roll the dice"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Offered only when a limit is actually holding a shared game back. */}
+      {overLimit.length > 0 && (
+        <label className="mt-4 flex min-h-11 cursor-pointer items-center gap-3 font-semibold text-forest">
+          <input
+            type="checkbox"
+            checked={ignoreLimits}
+            onChange={(event) => setIgnoreLimits(event.target.checked)}
+            disabled={rolling}
+            className="size-6 shrink-0 cursor-pointer accent-emerald"
+          />
+          Ignore player limits ({overLimit.length} more {overLimit.length === 1 ? "game" : "games"})
+        </label>
       )}
 
-      {party.almost.length > 0 && (
-        <section className="mt-12">
-          <h2 className="font-pixel text-4xl leading-none text-forest">Almost</h2>
-          <p className="mt-2 text-muted">One player short of a full set.</p>
-          <ul className="mt-6 space-y-4 px-1">
-            {party.almost.map((game) => (
-              <GameRow key={game.igdbId} game={game} note={`${game.missing} needs this one`} />
-            ))}
-          </ul>
-        </section>
+      {/* Read out once the dice has settled, not on every hop. */}
+      <p role="status" className="sr-only">
+        {rolled && !rolling ? `The dice picked ${rolled.title}.` : ""}
+      </p>
+
+      {rolled && !rolling && (
+        <p className="mt-5 bg-emerald px-4 py-3 text-lg font-bold text-forest pixel-frame mx-1">
+          The dice picked {rolled.title}.
+        </p>
       )}
-    </>
+
+      {tiles.length === 0 && (
+        <div className="mt-5">
+          <Notice tone="info">
+            You have no multiplayer games in your library yet. Add or import some to compare.
+          </Notice>
+        </div>
+      )}
+
+      {tiles.length > 0 && playable.length === 0 && (
+        <div className="mt-5">
+          <Notice tone="info">
+            No multiplayer game works for everyone yet. The greyed-out games below show how close
+            each one is.
+          </Notice>
+        </div>
+      )}
+
+      {tiles.length > 0 && (
+        <ul className="mt-6 grid grid-cols-3 gap-x-4 gap-y-5 px-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+          {tiles.map((tile) => {
+            const isRolled = tile.igdbId === rolledId;
+
+            return (
+              <li key={tile.igdbId} className="flex flex-col gap-2">
+                <span
+                  className={`relative block ring-4 transition duration-100 ease-out ${
+                    isRolled
+                      ? "-translate-y-1 shadow-[0_8px_0_0_var(--color-forest)] ring-emerald"
+                      : tile.playable
+                        ? "ring-forest"
+                        : "ring-fern/60"
+                  }`}
+                >
+                  <GameCover
+                    title={tile.title}
+                    coverUrl={tile.coverUrl}
+                    className={tile.playable ? "" : "opacity-35 grayscale"}
+                  />
+                  {isRolled && !rolling && (
+                    <span className="absolute bottom-1.5 left-1.5 bg-emerald px-1.5 font-pixel text-base leading-tight text-forest">
+                      ROLLED
+                    </span>
+                  )}
+                </span>
+                <span>
+                  <span
+                    className={`line-clamp-2 text-sm font-bold leading-snug ${
+                      tile.playable ? "text-forest" : "text-muted"
+                    }`}
+                  >
+                    {tile.title}
+                  </span>
+                  {tile.note && <span className="block text-xs text-muted">{tile.note}</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -91,7 +91,9 @@ export type PartyDetail = PartySummary & {
   // libraryEntryId points at the viewer's own copy of the game.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // missing is the display name of the one member who does not own the game.
-  almost: (PartyGame & { missing: string })[];
+  almost: (PartyGame & { missing: string; missingIsYou: boolean })[];
+  // The viewer's own multiplayer games that are in neither list.
+  others: PartyGame[];
 };
 
 export type Recommendation = {
