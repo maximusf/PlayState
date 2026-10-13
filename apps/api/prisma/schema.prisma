@@ -55,6 +55,9 @@ model Party {
   hostId String
   // Clerk user IDs of players the host removed. They cannot rejoin with the link.
   removedUserIds String[] @default([])
+  // The game the host's latest dice roll landed on, shown to every member.
+  rolledIgdbId Int?
+  rolledAt     DateTime?
 
   members PartyMember[]
 

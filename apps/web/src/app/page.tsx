@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { PixelIcon } from "@/components/pixel-icons";
+import { RandomDiceLink } from "@/components/random-dice-link";
 
 // Set to false to hide the player count scoreboard under the hero shelf.
 const SHOW_PLAYER_COUNT = true;
@@ -142,6 +143,7 @@ export default async function Home() {
           <div className="mt-8 flex flex-wrap items-center gap-6 px-1 pb-2">
             {userId ? (
               <>
+                <RandomDiceLink large />
                 <Link href="/pick" className="btn btn-primary btn-lg">
                   Pick a game
                 </Link>

@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ApiError,
   errorMessage,
   useApi,
   type PartyDetail,
   type PartyInvite,
+  type PartyRoll,
 } from "@/lib/api";
+import { useDiceRoll } from "@/lib/use-dice-roll";
 import { PixelIcon } from "@/components/pixel-icons";
+import { WinnerTrace } from "@/components/winner-trace";
 import { PartySkeleton } from "@/components/skeletons";
 import { CountedInput, EmptyState, GameCover, Notice } from "@/components/ui";
 import { expires, players } from "../parties-view";
@@ -38,6 +41,9 @@ function playerLimit(maxPlayers: number | null): string | null {
   return maxPlayers === null || maxPlayers >= NO_REAL_LIMIT ? null : `Up to ${players(maxPlayers)}`;
 }
 
+// How often an open party page checks whether anything has changed.
+const LIVE_CHECK_MS = 4000;
+
 type Tile = {
   igdbId: number;
   title: string;
@@ -47,20 +53,20 @@ type Tile = {
   note: string | null;
 };
 
-// How long the dice keeps hopping between covers before it settles, and how fast.
-const ROLL_HOPS = 14;
-const ROLL_HOP_MS = 90;
-
-function PartyGames({ party }: { party: PartyDetail }) {
+function PartyGames({
+  party,
+  path,
+  onRolled,
+}: {
+  party: PartyDetail;
+  path: string;
+  onRolled: (roll: PartyRoll) => void;
+}) {
+  const api = useApi();
   const alone = party.memberCount === 1;
-  const [rolledId, setRolledId] = useState<number | null>(null);
-  const [rolling, setRolling] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [rollError, setRollError] = useState<string | null>(null);
   const [ignoreLimits, setIgnoreLimits] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
 
   // A game whose player limit is unknown counts as playable. Only a known, too-low limit rules
   // it out, and the party can choose to ignore limits, since they are sometimes wrong and a
@@ -84,32 +90,36 @@ function PartyGames({ party }: { party: PartyDetail }) {
     ...party.others.map((game) => ({ ...game, playable: false, note: null })),
   ];
   const playable = tiles.filter((tile) => tile.playable);
-  const rolled = playable.find((tile) => tile.igdbId === rolledId) ?? null;
+  const sharedIds = party.shared.map((game) => game.igdbId);
+  const dice = useDiceRoll(sharedIds);
+  const rolling = dice.rolling || sending;
+  // While the dice hops, the cover it is on. Otherwise the roll saved on the party, which is
+  // the same for every member. A saved roll for a game no longer shared is not shown.
+  const saved =
+    party.rolledIgdbId !== null && sharedIds.includes(party.rolledIgdbId) ? party.rolledIgdbId : null;
+  const rolledId = dice.rolling ? dice.rolled : saved;
+  const rolled = party.shared.find((game) => game.igdbId === rolledId) ?? null;
 
-  function roll() {
-    const pick = () => playable[Math.floor(Math.random() * playable.length)].igdbId;
+  // The host's browser chooses, the server checks and saves it, and only then does the dice
+  // play out, landing on the saved game. Every other member sees it within a few seconds.
+  async function roll() {
+    const pool = playable.map((tile) => tile.igdbId);
+    // A fresh roll never repeats the last one when there is another choice.
+    const fresh = pool.filter((igdbId) => igdbId !== saved);
+    const from = fresh.length > 0 ? fresh : pool;
+    const target = from[Math.floor(Math.random() * from.length)];
 
-    // No hopping for players who have asked their device for less motion.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setRolledId(pick());
-      return;
+    setSending(true);
+    setRollError(null);
+
+    try {
+      onRolled(await api<PartyRoll>(`${path}/roll`, { method: "POST", body: { igdbId: target } }));
+      dice.roll(pool, target);
+    } catch (error) {
+      setRollError(`The roll was not saved. ${errorMessage(error)}`);
+    } finally {
+      setSending(false);
     }
-
-    setRolling(true);
-    let hops = 0;
-
-    const hop = () => {
-      setRolledId(pick());
-      hops += 1;
-
-      if (hops < ROLL_HOPS) {
-        timer.current = setTimeout(hop, ROLL_HOP_MS);
-      } else {
-        setRolling(false);
-      }
-    };
-
-    hop();
   }
 
   return (
@@ -119,18 +129,31 @@ function PartyGames({ party }: { party: PartyDetail }) {
           <h2 className="font-pixel text-4xl leading-none text-forest">
             {alone ? "Your multiplayer games" : "Games"}
           </h2>
-          <p className="mt-2 text-muted">
-            {alone
-              ? "Send the invite link to a friend to see which of these you share."
-              : `In colour: everyone owns it. Greyed out: not everyone does, or it holds fewer than ${players(party.memberCount)}.`}
-          </p>
+          {alone && (
+            <p className="mt-2 text-muted">
+              Send the invite link to a friend to see which of these you share.
+            </p>
+          )}
         </div>
+        {/* Only the host rolls. Everyone else sees the button, so they know to ask. */}
         {playable.length > 1 && (
-          <div className="px-1 pb-3">
-            <button type="button" onClick={roll} disabled={rolling} className="btn btn-primary">
-              <PixelIcon name="dice" className="size-5" />
-              {rolling ? "Rolling" : rolled ? "Roll again" : "Roll the dice"}
+          <div className="flex flex-col items-end gap-1 px-1 pb-3">
+            <button
+              type="button"
+              // Pressing it again while the dice is hopping skips to the result.
+              onClick={dice.rolling ? dice.skip : roll}
+              disabled={sending || !party.isHost}
+              aria-describedby={party.isHost ? undefined : "dice-host-only"}
+              className="btn btn-primary"
+            >
+              <PixelIcon name="dice" className="size-6" />
+              {dice.rolling ? "Skip" : sending ? "Rolling" : rolled ? "Roll again" : "Roll the dice"}
             </button>
+            {!party.isHost && (
+              <p id="dice-host-only" className="text-sm text-muted">
+                Only the host can roll.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -152,6 +175,12 @@ function PartyGames({ party }: { party: PartyDetail }) {
               : `Adds ${overLimit.length} ${overLimit.length === 1 ? "game" : "games"} too small for ${players(party.memberCount)}`}
           </span>
         </label>
+      )}
+
+      {rollError && (
+        <div className="mt-4">
+          <Notice tone="error">{rollError}</Notice>
+        </div>
       )}
 
       {/* Read out once the dice has settled, not on every hop. */}
@@ -186,38 +215,48 @@ function PartyGames({ party }: { party: PartyDetail }) {
         <ul className="mt-6 grid grid-cols-3 gap-x-4 gap-y-5 px-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
           {tiles.map((tile) => {
             const isRolled = tile.igdbId === rolledId;
+            // Colour means a game the party shares. Alone there is nobody to share with, so every
+            // game starts grey, and the dice brings each one to colour as it lands on it.
+            const coloured = isRolled || (tile.playable && !alone);
 
             return (
               <li key={tile.igdbId} className="group flex flex-col gap-2">
                 {/* Hovering lifts a cover, like in the library. The dice lifts its pick the same way. */}
+                {/* While the dice is rolling nothing pops out: no lift on hover, and none on the
+                    cover the dice is passing over. The lift is kept for where it settles. */}
                 <span
-                  className={`relative block ring-4 transition duration-150 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)] ${
+                  className={`relative block ring-4 transition duration-150 ease-out ${
+                    rolling
+                      ? ""
+                      : "group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)]"
+                  } ${
                     isRolled
-                      ? "-translate-y-1 shadow-[0_8px_0_0_var(--color-forest)] ring-emerald"
-                      : tile.playable
-                        ? "ring-forest group-hover:ring-emerald"
-                        : "ring-fern/60 group-hover:ring-forest"
+                      ? // Passing over: a green outline. Settled: the lift, and the gold trace in its place.
+                        rolling
+                        ? "ring-emerald"
+                        : "-translate-y-1 shadow-[0_8px_0_0_var(--color-forest)] ring-transparent"
+                      : coloured
+                        ? `ring-forest ${rolling ? "" : "group-hover:ring-emerald"}`
+                        : `ring-fern/60 ${rolling ? "" : "group-hover:ring-forest"}`
                   }`}
                 >
                   <GameCover
                     title={tile.title}
                     coverUrl={tile.coverUrl}
-                    className={
-                      tile.playable
+                    className={`transition duration-100 ease-out ${
+                      coloured
                         ? ""
-                        : "opacity-35 grayscale transition duration-150 ease-out group-hover:opacity-100 group-hover:grayscale-0"
-                    }
+                        : `opacity-35 grayscale ${
+                            rolling ? "" : "group-hover:opacity-100 group-hover:grayscale-0"
+                          }`
+                    }`}
                   />
-                  {isRolled && !rolling && (
-                    <span className="absolute bottom-1.5 left-1.5 bg-emerald px-1.5 font-pixel text-base leading-tight text-forest">
-                      ROLLED
-                    </span>
-                  )}
+                  {isRolled && !rolling && <WinnerTrace />}
                 </span>
                 <span>
                   <span
                     className={`line-clamp-2 text-sm font-bold leading-snug ${
-                      tile.playable ? "text-forest" : "text-muted"
+                      coloured ? "text-forest" : "text-muted"
                     }`}
                   >
                     {tile.title}
@@ -285,6 +324,45 @@ export function PartyView({ code }: { code: string }) {
     setState({ status: "loading" });
     setReloadKey((key) => key + 1);
   }
+
+  // Keeps the page current without a refresh. Every few seconds it asks for the party's
+  // version, a cheap check, and loads the party again only when that has changed: someone
+  // joined or left, the host rolled or renamed it.
+  const version = state.status === "ready" ? state.party.version : null;
+
+  useEffect(() => {
+    if (version === null) return;
+    let cancelled = false;
+    let checking = false;
+
+    const timer = setInterval(async () => {
+      // No checks while the tab is in the background, or while the last one is still running.
+      if (document.hidden || checking) return;
+      checking = true;
+
+      try {
+        const latest = await api<{ version: string }>(`${path}/version`);
+        if (cancelled || latest.version === version) return;
+
+        const party = await api<PartyDetail>(path);
+        if (!cancelled) setState({ status: "ready", party });
+      } catch (error) {
+        // Removed, ended or expired: load from the top, which shows the right message.
+        // Anything else, such as a dropped connection, is tried again on the next check.
+        if (!cancelled && error instanceof ApiError && [403, 404].includes(error.status)) {
+          setState({ status: "loading" });
+          setReloadKey((key) => key + 1);
+        }
+      } finally {
+        checking = false;
+      }
+    }, LIVE_CHECK_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [api, path, version]);
 
   async function join(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -634,7 +712,17 @@ export function PartyView({ code }: { code: string }) {
               </div>
             )}
 
-            <PartyGames party={state.party} />
+            <PartyGames
+              party={state.party}
+              path={path}
+              onRolled={(roll) =>
+                setState((current) =>
+                  current.status === "ready"
+                    ? { status: "ready", party: { ...current.party, ...roll } }
+                    : current,
+                )
+              }
+            />
           </div>
         )}
       </div>

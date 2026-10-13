@@ -77,14 +77,18 @@ export function CountedInput({
 }
 
 // Cover art, with a pixel placeholder when IGDB has none.
+// `eager` loads the image straight away, for covers that slide into view before the browser
+// would otherwise bother to fetch them.
 export function GameCover({
   title,
   coverUrl,
   className = "",
+  eager = false,
 }: {
   title: string;
   coverUrl: string | null;
   className?: string;
+  eager?: boolean;
 }) {
   return (
     <div className={`relative aspect-[3/4] overflow-hidden bg-fern/50 ${className}`}>
@@ -95,6 +99,7 @@ export function GameCover({
           fill
           sizes="(min-width: 1024px) 200px, 45vw"
           className="object-cover"
+          loading={eager ? "eager" : undefined}
           unoptimized
         />
       ) : (

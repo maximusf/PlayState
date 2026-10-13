@@ -16,6 +16,7 @@ const db = vi.hoisted(() => ({
   userGame: {
     findMany: vi.fn(),
     findFirst: vi.fn(),
+    count: vi.fn(),
     create: vi.fn(),
     createMany: vi.fn(),
     groupBy: vi.fn(),
@@ -326,6 +327,26 @@ describe("GET /api/library", () => {
     expect(db.userGame.findMany.mock.calls[0][0].where).toEqual({ userId: "user_a" });
     expect(res.body.data[0]).toMatchObject({ id: "entry_1", game: { igdbId: 113112 } });
     expect(res.body.data[0].userId).toBeUndefined();
+  });
+});
+
+describe("GET /api/library/count", () => {
+  it("counts only the authenticated user's games", async () => {
+    db.userGame.count.mockResolvedValue(7);
+
+    const res = await request(app).get("/api/library/count").set("x-test-user", "user_a");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: { count: 7 } });
+    expect(db.userGame.count).toHaveBeenCalledWith({ where: { userId: "user_a" } });
+    // It must not be mistaken for a library item called "count".
+    expect(db.userGame.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/library/count");
+
+    expect(res.status).toBe(401);
   });
 });
 
@@ -891,6 +912,8 @@ describe("parties", () => {
     // user_a started every party in these tests.
     hostId: "user_a",
     removedUserIds: [] as string[],
+    rolledIgdbId: null as number | null,
+    rolledAt: null as Date | null,
     createdAt: new Date(),
     members,
   });
@@ -1213,6 +1236,8 @@ describe("parties", () => {
       { id: "member_rio", displayName: "Rio", isYou: false, isHost: false },
     ]);
     expect(res.body.data.isHost).toBe(true);
+    expect(res.body.data).toMatchObject({ rolledIgdbId: null, rolledAt: null });
+    expect(res.body.data.version).toEqual(expect.any(String));
     // Members know each other by display name only.
     expect(JSON.stringify(res.body)).not.toContain("user_b");
   });
@@ -1365,6 +1390,72 @@ describe("parties", () => {
     expect(rejoin.status).toBe(403);
     expect(rejoin.body.error.code).toBe("PARTY_REMOVED");
     expect(db.partyMember.upsert).not.toHaveBeenCalled();
+  });
+
+  it("records the host's roll for everyone, after checking the game is really shared", async () => {
+    const halo = game("game_1", "Halo Infinite", ["Multiplayer"]);
+    const hades = game("game_3", "Hades", ["Single player"]);
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+    const roll = (user: string, igdbId: unknown) =>
+      request(app).post(`/api/parties/${CODE}/roll`).set("x-test-user", user).send({ igdbId });
+
+    const byMember = await roll("user_b", 1);
+    expect(byMember.status).toBe(403);
+    expect(byMember.body.error.code).toBe("PARTY_NOT_HOST");
+
+    // Only Max owns it.
+    db.userGame.findMany.mockResolvedValueOnce([owns("user_a", halo)]);
+    const notShared = await roll("user_a", 1);
+    // Both own it, but it cannot be played together.
+    db.userGame.findMany.mockResolvedValueOnce([owns("user_a", hades), owns("user_b", hades)]);
+    const singlePlayer = await roll("user_a", 3);
+
+    for (const res of [notShared, singlePlayer]) {
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("PARTY_GAME_NOT_SHARED");
+    }
+    expect((await roll("user_a", "1")).status).toBe(400);
+    expect(db.party.update).not.toHaveBeenCalled();
+
+    db.userGame.findMany.mockResolvedValueOnce([owns("user_a", halo), owns("user_b", halo)]);
+    const ok = await roll("user_a", 1);
+
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.rolledIgdbId).toBe(1);
+    expect(db.userGame.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { userId: { in: ["user_a", "user_b"] }, game: { igdbId: 1 } },
+      }),
+    );
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { rolledIgdbId: 1, rolledAt: expect.any(Date) },
+    });
+  });
+
+  it("gives members a version that changes when the party does", async () => {
+    const two = party(member("user_a", "Max"), member("user_b", "Sam"));
+    const check = async (current: object, user = "user_b") => {
+      db.party.findUnique.mockResolvedValue(current);
+      return request(app).get(`/api/parties/${CODE}/version`).set("x-test-user", user);
+    };
+
+    const before = await check(two);
+    const same = await check(two, "user_a");
+    const joined = await check(party(member("user_a", "Max"), member("user_b", "Sam"), member("user_c", "Rio")));
+    const renamed = await check({ ...two, name: "Saturday night" });
+    const rolled = await check({ ...two, rolledIgdbId: 1, rolledAt: new Date("2026-10-13T12:00:00Z") });
+    const outsider = await check(two, "user_z");
+
+    expect(before.status).toBe(200);
+    // Every member gets the same version for the same party.
+    expect(same.body.data.version).toBe(before.body.data.version);
+    for (const changed of [joined, renamed, rolled]) {
+      expect(changed.body.data.version).not.toBe(before.body.data.version);
+    }
+    expect(outsider.status).toBe(403);
+    // Checking the version never reads anyone's library.
+    expect(db.userGame.findMany).not.toHaveBeenCalled();
   });
 
   it("lets the host end the party for everyone, and nobody else", async () => {

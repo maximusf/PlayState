@@ -6,15 +6,18 @@ import {
   PartyCodeParamSchema,
   PartyMemberParamSchema,
   RenamePartySchema,
+  RollSchema,
 } from "../schemas/party.schema";
 import {
   createParty,
   endParty,
   getInvite,
   getParty,
+  getPartyVersion,
   joinParty,
   leaveParty,
   listParties,
+  recordRoll,
   removeMember,
   renameParty,
 } from "../services/party.service";
@@ -47,6 +50,19 @@ export async function detail(req: Request, res: Response) {
   const { code } = PartyCodeParamSchema.parse(req.params);
 
   res.status(200).json({ data: await getParty(getUserId(res), code) });
+}
+
+export async function version(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+
+  res.status(200).json({ data: await getPartyVersion(getUserId(res), code) });
+}
+
+export async function roll(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { igdbId } = RollSchema.parse(req.body);
+
+  res.status(200).json({ data: await recordRoll(getUserId(res), code, igdbId) });
 }
 
 export async function rename(req: Request, res: Response) {

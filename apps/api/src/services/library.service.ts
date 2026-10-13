@@ -39,6 +39,10 @@ function toLibraryEntry(entry: UserGameWithGame) {
   };
 }
 
+export async function countLibrary(userId: string): Promise<number> {
+  return prisma.userGame.count({ where: { userId } });
+}
+
 export async function listLibrary(userId: string): Promise<LibraryEntry[]> {
   const entries = await prisma.userGame.findMany({
     where: { userId },

@@ -94,7 +94,14 @@ export type PartyDetail = PartySummary & {
   almost: (PartyGame & { missing: string; missingIsYou: boolean })[];
   // The viewer's own multiplayer games that are in neither list.
   others: PartyGame[];
+  // The host's latest dice roll, the same for every member.
+  rolledIgdbId: number | null;
+  rolledAt: string | null;
+  // Changes whenever the party does. The page checks it to know when to reload.
+  version: string;
 };
+
+export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
 
 export type Recommendation = {
   id: string;

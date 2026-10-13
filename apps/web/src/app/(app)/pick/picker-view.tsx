@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, errorMessage, useApi, type Recommendation } from "@/lib/api";
 import { genreLine } from "@/lib/genres";
+import { useDiceRoll } from "@/lib/use-dice-roll";
+import { PixelIcon } from "@/components/pixel-icons";
+import { WinnerTrace } from "@/components/winner-trace";
 import { PickCardsSkeleton } from "@/components/skeletons";
 import { EmptyState, GameCover, Notice } from "@/components/ui";
 
@@ -79,6 +82,8 @@ export function PickerView() {
   const [result, setResult] = useState<Result>({ status: "idle" });
   // Library entries already suggested for the current answers.
   const [seen, setSeen] = useState<string[]>([]);
+  // A roll between the picks on screen, for when three is still too many.
+  const dice = useDiceRoll(result.status === "ready" ? result.games.map((game) => game.id) : []);
   const questionRef = useRef<HTMLLegendElement>(null);
   const resultsRef = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
@@ -310,6 +315,13 @@ export function PickerView() {
   }
 
   const games = result.status === "ready" ? result.games : [];
+  const rolledGame = games.find((game) => game.id === dice.rolled) ?? null;
+  // The dice button shows only an icon, so its meaning is spelled out for hover and screen readers.
+  const diceLabel = dice.rolling
+    ? "Skip to the result"
+    : dice.rolled
+      ? "Roll the dice again"
+      : "Roll the dice to choose one of these";
   const heading =
     result.status === "exhausted"
       ? "That is all of them"
@@ -336,11 +348,26 @@ export function PickerView() {
           </div>
         </div>
         <div className="flex flex-wrap gap-5 px-1 pb-3">
-          <button type="button" onClick={() => goTo(0)} className="btn btn-secondary">
-            Change answers
-          </button>
+          {/* A square dice button, like the one on the home page. It rolls between these picks,
+              and pressing it again while the dice is hopping skips to the result. */}
+          {games.length > 1 && (
+            <button
+              type="button"
+              onClick={() => (dice.rolling ? dice.skip() : dice.roll(games.map((game) => game.id)))}
+              aria-label={diceLabel}
+              title={diceLabel}
+              className="btn btn-primary w-11 px-0"
+            >
+              <PixelIcon name="dice" className="size-6" />
+            </button>
+          )}
           {(result.status === "ready" || result.status === "exhausted") && (
-            <button type="button" onClick={() => findGames(seen)} className="btn btn-primary">
+            <button
+              type="button"
+              onClick={() => findGames(seen)}
+              disabled={dice.rolling}
+              className="btn btn-primary"
+            >
               Pick again
             </button>
           )}
@@ -349,6 +376,9 @@ export function PickerView() {
               Try again
             </button>
           )}
+          <button type="button" onClick={() => goTo(0)} className="btn btn-secondary">
+            Change answers
+          </button>
         </div>
       </div>
 
@@ -386,10 +416,34 @@ export function PickerView() {
           </Notice>
         )}
 
+        {/* Read out once the dice has settled, not on every hop. */}
+        <p role="status" className="sr-only">
+          {rolledGame && !dice.rolling ? `The dice picked ${rolledGame.title}.` : ""}
+        </p>
+
         {games.length > 0 && (
           <ol className="grid gap-7 px-1 sm:grid-cols-2 lg:grid-cols-3">
-            {games.map((game, index) => (
-              <li key={game.id} className="flex flex-col gap-4 bg-surface p-5 pixel-frame">
+            {games.map((game, index) => {
+              const isRolled = dice.rolled === game.id;
+              // Once the dice is in play, every pick greys out except the one it is on.
+              const dimmed = dice.rolled !== null && !isRolled;
+
+              return (
+              <li
+                key={game.id}
+                className={`relative flex flex-col gap-4 bg-surface p-5 pixel-frame transition duration-100 ease-out ${
+                  // Passing over: a green frame. Settled: the card lifts and the gold trace
+                  // takes the frame's place.
+                  isRolled
+                    ? dice.rolling
+                      ? "[--frame:var(--color-emerald)]"
+                      : "-translate-y-1 [--frame:transparent]"
+                    : ""
+                } ${
+                  dimmed ? "opacity-40 grayscale" : ""
+                }`}
+              >
+                {isRolled && !dice.rolling && <WinnerTrace notched />}
                 <div className="relative">
                   <GameCover title={game.title} coverUrl={game.coverUrl} />
                   <span className="absolute left-3 top-3 bg-emerald px-2 font-pixel text-xl leading-tight text-forest">
@@ -426,7 +480,8 @@ export function PickerView() {
                   </Link>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ol>
         )}
       </section>
