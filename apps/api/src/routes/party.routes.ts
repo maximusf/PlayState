@@ -1,5 +1,15 @@
 import { Router } from "express";
-import { create, detail, end, invite, join, leave, list } from "../controllers/party.controller";
+import {
+  create,
+  detail,
+  end,
+  invite,
+  join,
+  leave,
+  list,
+  remove,
+  rename,
+} from "../controllers/party.controller";
 import { requireUser } from "../middleware/auth.middleware";
 import { rateLimit } from "../middleware/rate-limit.middleware";
 
@@ -24,9 +34,12 @@ const joinLimit = rateLimit({
 router.get("/", list);
 router.post("/", createLimit, create);
 router.get("/:code", detail);
+router.patch("/:code", rename);
 router.delete("/:code", end);
 router.get("/:code/invite", invite);
 router.post("/:code/members", joinLimit, join);
+// "me" is matched before a member ID, so a player leaving is never read as a removal.
 router.delete("/:code/members/me", leave);
+router.delete("/:code/members/:memberId", remove);
 
 export default router;

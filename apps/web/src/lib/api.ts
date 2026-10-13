@@ -69,7 +69,11 @@ export type PartySummary = {
   isHost: boolean;
 };
 
-export type PartyInvite = PartySummary & { joined: boolean };
+export type PartyInvite = PartySummary & {
+  joined: boolean;
+  // True when the host removed this player, who can then no longer join.
+  removed: boolean;
+};
 
 type PartyGame = {
   igdbId: number;
@@ -82,7 +86,8 @@ type PartyGame = {
 };
 
 export type PartyDetail = PartySummary & {
-  members: { displayName: string; isYou: boolean; isHost: boolean }[];
+  // id names a member within this party. It is not an account ID.
+  members: { id: string; displayName: string; isYou: boolean; isHost: boolean }[];
   // libraryEntryId points at the viewer's own copy of the game.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // missing is the display name of the one member who does not own the game.

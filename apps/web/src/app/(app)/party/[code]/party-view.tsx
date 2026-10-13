@@ -28,6 +28,10 @@ const coverLift =
   "transition duration-200 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)] group-focus-visible:-translate-y-1 group-focus-visible:shadow-[0_8px_0_0_var(--color-forest)]";
 const dangerLink =
   "min-h-11 cursor-pointer px-2 font-semibold text-danger underline underline-offset-4 hover:no-underline disabled:opacity-60";
+const plainLink =
+  "min-h-11 cursor-pointer font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60";
+const chipButton =
+  "min-h-11 cursor-pointer underline underline-offset-4 hover:no-underline disabled:opacity-60";
 const row = "flex items-center gap-4 bg-surface p-3 pixel-frame [--frame:var(--color-fern)]";
 
 // IGDB marks some games with a placeholder for "no real limit". Those show no limit at all.
@@ -169,8 +173,12 @@ export function PartyView({ code }: { code: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  // Ending a party removes it for everyone, so the host confirms with a second press.
-  const [confirmingEnd, setConfirmingEnd] = useState(false);
+  // Ending a party, or leaving it as host, changes it for everyone, so both are confirmed first.
+  const [confirming, setConfirming] = useState<"leave" | "end" | null>(null);
+  // Host controls: the new name being typed, and the member about to be removed.
+  const [newName, setNewName] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const path = `/api/parties/${encodeURIComponent(code)}`;
 
@@ -239,22 +247,68 @@ export function PartyView({ code }: { code: string }) {
     }
   }
 
-  // The host ends the party for everyone. Anyone else just leaves it.
-  async function leaveOrEnd(isHost: boolean) {
+  async function rename(event: React.SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (state.status !== "ready" || newName === null) return;
+
+    if (!newName.trim()) {
+      setActionError("Give the party a name.");
+      return;
+    }
+
+    setBusy(true);
+    setActionError(null);
+
+    try {
+      const { name } = await api<{ name: string }>(path, { method: "PATCH", body: { name: newName } });
+      setState({ status: "ready", party: { ...state.party, name } });
+      setNewName(null);
+    } catch (error) {
+      setActionError(`The party was not renamed. ${errorMessage(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeMember(memberId: string) {
+    setBusy(true);
+    setActionError(null);
+
+    try {
+      await api(`${path}/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
+      setRemovingId(null);
+      // The shared games change when someone goes, so the party is loaded again.
+      reload();
+    } catch (error) {
+      setActionError(`That player was not removed. ${errorMessage(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Ending deletes the party for everyone. Leaving takes only this player out of it.
+  async function leaveOrEnd(end: boolean) {
     setLeaving(true);
     setActionError(null);
 
     try {
-      await api(isHost ? path : `${path}/members/me`, { method: "DELETE" });
+      await api(end ? path : `${path}/members/me`, { method: "DELETE" });
       router.push("/party");
     } catch (error) {
       setActionError(
-        `${isHost ? "The party was not ended." : "You are still in this party."} ${errorMessage(error)}`,
+        `${end ? "The party was not ended." : "You are still in this party."} ${errorMessage(error)}`,
       );
       setLeaving(false);
-      setConfirmingEnd(false);
+      setConfirming(null);
     }
   }
+
+  // Who takes over if the host leaves: the player who has been in the party longest.
+  // The API lists members in the order they joined.
+  const nextHost =
+    state.status === "ready" && state.party.isHost
+      ? (state.party.members.find((member) => !member.isYou) ?? null)
+      : null;
 
   return (
     <div>
@@ -290,7 +344,15 @@ export function PartyView({ code }: { code: string }) {
           </div>
         )}
 
-        {state.status === "invite" && (
+        {state.status === "invite" && state.invite.removed && (
+          <div className="mx-auto max-w-md">
+            <Notice tone="info">
+              The host removed you from {state.invite.name}, so this link no longer lets you in.
+            </Notice>
+          </div>
+        )}
+
+        {state.status === "invite" && !state.invite.removed && (
           <form onSubmit={join} className="mx-auto max-w-md space-y-5 bg-surface p-6 pixel-frame">
             <div>
               <p className="pixel-label text-pine">You are invited to</p>
@@ -336,10 +398,54 @@ export function PartyView({ code }: { code: string }) {
             <div className="flex flex-wrap items-end justify-between gap-6">
               <div>
                 <p className="pixel-label text-pine">Party</p>
-                <h1 className="mt-3 font-pixel text-6xl leading-[0.9] text-forest">
-                  {state.party.name}
-                </h1>
-                <p className="mt-2 text-muted">{expires(state.party.expiresAt)}</p>
+                {newName === null ? (
+                  <>
+                    <h1 className="mt-3 font-pixel text-6xl leading-[0.9] text-forest">
+                      {state.party.name}
+                    </h1>
+                    <p className="mt-2 flex flex-wrap items-center gap-x-4 text-muted">
+                      {expires(state.party.expiresAt)}
+                      {state.party.isHost && (
+                        <button
+                          type="button"
+                          onClick={() => setNewName(state.party.name)}
+                          className={plainLink}
+                        >
+                          Rename
+                        </button>
+                      )}
+                    </p>
+                  </>
+                ) : (
+                  <form onSubmit={rename} className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <label htmlFor="party-rename" className="sr-only">
+                      Party name
+                    </label>
+                    <div className="w-72 max-w-full">
+                      <CountedInput
+                        id="party-rename"
+                        type="text"
+                        value={newName}
+                        onChange={(event) => setNewName(event.target.value)}
+                        autoComplete="off"
+                        maxLength={40}
+                        autoFocus
+                        className="min-h-11 w-full min-w-0 bg-surface px-3 text-forest ring-2 ring-fern ring-inset"
+                      />
+                    </div>
+                    <button type="submit" disabled={busy} className={plainLink}>
+                      {busy ? "Saving" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewName(null)}
+                      disabled={busy}
+                      className={plainLink}
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                )}
               </div>
               <div className="px-1 pb-3">
                 <button type="button" onClick={copyLink} className="btn btn-primary">
@@ -349,18 +455,54 @@ export function PartyView({ code }: { code: string }) {
             </div>
 
             <ul aria-label="Players in this party" className="mt-6 flex flex-wrap gap-2">
-              {state.party.members.map((member, index) => (
+              {state.party.members.map((member) => (
                 <li
-                  key={`${member.displayName}-${index}`}
-                  className={`px-3 py-1.5 text-[0.9375rem] font-semibold ${
+                  key={member.id}
+                  className={`flex min-h-11 items-center gap-3 px-3 text-[0.9375rem] font-semibold ${
                     member.isYou
                       ? "bg-forest text-surface"
                       : "bg-surface text-forest ring-2 ring-fern ring-inset"
                   }`}
                 >
-                  {member.displayName}
-                  {member.isYou && " (you)"}
-                  {member.isHost && !member.isYou && " (host)"}
+                  {removingId === member.id ? (
+                    <>
+                      <span role="status">Remove {member.displayName}?</span>
+                      <button
+                        type="button"
+                        onClick={() => removeMember(member.id)}
+                        disabled={busy}
+                        className={`${chipButton} text-danger`}
+                      >
+                        {busy ? "Removing" : "Yes"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRemovingId(null)}
+                        disabled={busy}
+                        className={chipButton}
+                      >
+                        No
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        {member.displayName}
+                        {member.isYou && " (you)"}
+                        {member.isHost && !member.isYou && " (host)"}
+                      </span>
+                      {/* Only the host sees this, and never on their own name. */}
+                      {state.party.isHost && !member.isYou && (
+                        <button
+                          type="button"
+                          onClick={() => setRemovingId(member.id)}
+                          className={`${chipButton} text-danger`}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
@@ -374,43 +516,49 @@ export function PartyView({ code }: { code: string }) {
             <PartyGames party={state.party} />
 
             <div className="mt-12 flex flex-wrap items-center gap-x-5 gap-y-2 border-t-4 border-dotted border-fern pt-4">
-              {!state.party.isHost && (
-                <button
-                  type="button"
-                  onClick={() => leaveOrEnd(false)}
-                  disabled={leaving}
-                  className={dangerLink}
-                >
-                  {leaving ? "Leaving" : "Leave party"}
-                </button>
+              {confirming === null && (
+                <>
+                  {/* A host who is alone has nobody to hand the party to, so they can only end it. */}
+                  {(!state.party.isHost || nextHost) && (
+                    <button
+                      type="button"
+                      onClick={() => (state.party.isHost ? setConfirming("leave") : leaveOrEnd(false))}
+                      disabled={leaving}
+                      className={dangerLink}
+                    >
+                      {leaving ? "Leaving" : "Leave party"}
+                    </button>
+                  )}
+                  {state.party.isHost && (
+                    <button type="button" onClick={() => setConfirming("end")} className={dangerLink}>
+                      End party
+                    </button>
+                  )}
+                </>
               )}
 
-              {state.party.isHost && !confirmingEnd && (
-                <button type="button" onClick={() => setConfirmingEnd(true)} className={dangerLink}>
-                  End party
-                </button>
-              )}
-
-              {state.party.isHost && confirmingEnd && (
+              {confirming !== null && (
                 <>
                   <p role="status" className="font-semibold text-forest">
-                    End this party for all {players(state.party.memberCount)}?
+                    {confirming === "leave"
+                      ? `Leave this party? ${nextHost?.displayName} will become the host.`
+                      : `End this party for all ${players(state.party.memberCount)}?`}
                   </p>
                   <button
                     type="button"
-                    onClick={() => leaveOrEnd(true)}
+                    onClick={() => leaveOrEnd(confirming === "end")}
                     disabled={leaving}
                     className={dangerLink}
                   >
-                    {leaving ? "Ending" : "Yes, end it"}
+                    {leaving ? "Working" : confirming === "leave" ? "Yes, leave" : "Yes, end it"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmingEnd(false)}
+                    onClick={() => setConfirming(null)}
                     disabled={leaving}
-                    className="min-h-11 cursor-pointer px-2 font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60"
+                    className={plainLink}
                   >
-                    Keep it
+                    {confirming === "leave" ? "Stay" : "Keep it"}
                   </button>
                 </>
               )}

@@ -1,6 +1,12 @@
 import type { Request, Response } from "express";
 import { getUserId } from "../middleware/auth.middleware";
-import { CreatePartySchema, JoinPartySchema, PartyCodeParamSchema } from "../schemas/party.schema";
+import {
+  CreatePartySchema,
+  JoinPartySchema,
+  PartyCodeParamSchema,
+  PartyMemberParamSchema,
+  RenamePartySchema,
+} from "../schemas/party.schema";
 import {
   createParty,
   endParty,
@@ -9,6 +15,8 @@ import {
   joinParty,
   leaveParty,
   listParties,
+  removeMember,
+  renameParty,
 } from "../services/party.service";
 
 export async function list(_req: Request, res: Response) {
@@ -39,6 +47,21 @@ export async function detail(req: Request, res: Response) {
   const { code } = PartyCodeParamSchema.parse(req.params);
 
   res.status(200).json({ data: await getParty(getUserId(res), code) });
+}
+
+export async function rename(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { name } = RenamePartySchema.parse(req.body);
+
+  res.status(200).json({ data: await renameParty(getUserId(res), code, name) });
+}
+
+export async function remove(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { memberId } = PartyMemberParamSchema.parse(req.params);
+  await removeMember(getUserId(res), code, memberId);
+
+  res.status(204).end();
 }
 
 export async function end(req: Request, res: Response) {

@@ -6,9 +6,8 @@ import { hasAny, MULTIPLAYER_MODES } from "./preferences";
 
 // Keeps one party small enough to compare quickly, and one account from creating endless parties.
 const MAX_MEMBERS = 12;
-const MAX_PARTIES_PER_USER = 20;
-// How many parties one player can be hosting at once.
-const MAX_HOSTED_PARTIES = 3;
+// How many parties one player can be in at once, counting the ones they host.
+const MAX_PARTIES_PER_USER = 3;
 // A party is for one evening of deciding what to play. After a day it is gone.
 const PARTY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -31,10 +30,15 @@ export type PartySummary = {
   isHost: boolean;
 };
 
-export type PartyInvite = PartySummary & { joined: boolean };
+export type PartyInvite = PartySummary & {
+  joined: boolean;
+  // True when the host removed this player, who can then no longer join.
+  removed: boolean;
+};
 
 export type PartyDetail = PartySummary & {
-  members: { displayName: string; isYou: boolean; isHost: boolean }[];
+  // id names a member within this party. It is not the account ID, which stays on the server.
+  members: { id: string; displayName: string; isYou: boolean; isHost: boolean }[];
   // Multiplayer games every member owns. libraryEntryId is the viewer's own entry.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // Multiplayer games all but one member owns, and who is missing each.
@@ -94,19 +98,11 @@ export async function createParty(
 ): Promise<PartySummary> {
   await deleteExpiredParties();
 
-  if ((await prisma.party.count({ where: { hostId: userId } })) >= MAX_HOSTED_PARTIES) {
-    throw new AppError(
-      409,
-      "PARTY_HOST_LIMIT",
-      `You can host ${MAX_HOSTED_PARTIES} parties at a time. End one to start another.`,
-    );
-  }
-
   if ((await prisma.partyMember.count({ where: { userId } })) >= MAX_PARTIES_PER_USER) {
     throw new AppError(
       409,
       "PARTY_LIMIT_REACHED",
-      `You can be in at most ${MAX_PARTIES_PER_USER} parties. Leave one to start another.`,
+      `You can be in ${MAX_PARTIES_PER_USER} parties at a time. Leave one to start another.`,
     );
   }
 
@@ -140,6 +136,7 @@ export async function getInvite(userId: string, code: string): Promise<PartyInvi
     expiresAt: expiresAt(party).toISOString(),
     isHost: party.hostId === userId,
     joined: party.members.some((member) => member.userId === userId),
+    removed: party.removedUserIds.includes(userId),
   };
 }
 
@@ -153,6 +150,10 @@ export async function joinParty(
   const party = await findParty(code);
   const alreadyIn = party.members.some((member) => member.userId === userId);
 
+  if (party.removedUserIds.includes(userId)) {
+    throw new AppError(403, "PARTY_REMOVED", "The host removed you from this party.");
+  }
+
   if (!alreadyIn && party.members.length >= MAX_MEMBERS) {
     throw new AppError(409, "PARTY_FULL", `This party is full. A party holds ${MAX_MEMBERS} players.`);
   }
@@ -161,7 +162,7 @@ export async function joinParty(
     throw new AppError(
       409,
       "PARTY_LIMIT_REACHED",
-      `You can be in at most ${MAX_PARTIES_PER_USER} parties. Leave one to join another.`,
+      `You can be in ${MAX_PARTIES_PER_USER} parties at a time. Leave one to join this one.`,
     );
   }
 
@@ -249,6 +250,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     isHost: party.hostId === userId,
     // User IDs stay on the server. Members know each other only by display name.
     members: party.members.map((member) => ({
+      id: member.id,
       displayName: member.displayName,
       isYou: member.userId === userId,
       isHost: member.userId === party.hostId,
@@ -258,37 +260,92 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
   };
 }
 
+type PartyWithMembers = { id: string; hostId: string; members: { userId: string }[] };
+
+// When the host goes, the party passes to whoever has been in it longest. Members are
+// listed in the order they joined. A host who is alone takes the party with them.
+async function handOverOrEnd(party: PartyWithMembers, leavingHostId: string): Promise<void> {
+  const nextHost = party.members.find((member) => member.userId !== leavingHostId);
+
+  if (nextHost) {
+    await prisma.party.update({ where: { id: party.id }, data: { hostId: nextHost.userId } });
+  } else {
+    await prisma.party.delete({ where: { id: party.id } });
+  }
+}
+
 export async function leaveParty(userId: string, code: string): Promise<void> {
   const party = await findParty(code);
 
-  // A party without its host would have nobody able to end it.
-  if (party.hostId === userId) {
+  if (!party.members.some((member) => member.userId === userId)) throw notFound();
+
+  // The new host is in place before the old one goes, so the party is never without one.
+  if (party.hostId === userId) await handOverOrEnd(party, userId);
+
+  await prisma.partyMember.deleteMany({ where: { partyId: party.id, userId } });
+}
+
+function requireHost(party: { hostId: string }, userId: string, action: string): void {
+  if (party.hostId !== userId) {
+    throw new AppError(403, "PARTY_NOT_HOST", `Only the player who started this party can ${action}.`);
+  }
+}
+
+export async function renameParty(userId: string, code: string, name: string): Promise<{ name: string }> {
+  const party = await findParty(code);
+  requireHost(party, userId, "rename it");
+
+  await prisma.party.update({ where: { id: party.id }, data: { name } });
+
+  return { name };
+}
+
+// Takes a player out of the party and stops them rejoining with the link.
+export async function removeMember(userId: string, code: string, memberId: string): Promise<void> {
+  const party = await findParty(code);
+  requireHost(party, userId, "remove players");
+
+  const member = party.members.find((candidate) => candidate.id === memberId);
+
+  if (!member) {
+    throw new AppError(404, "PARTY_MEMBER_NOT_FOUND", "That player is not in this party.");
+  }
+
+  if (member.userId === party.hostId) {
     throw new AppError(
       409,
       "PARTY_HOST_CANNOT_LEAVE",
-      "You started this party, so you cannot leave it. End the party instead.",
+      "You cannot remove yourself. End the party instead.",
     );
   }
 
-  const { count } = await prisma.partyMember.deleteMany({ where: { partyId: party.id, userId } });
-
-  if (count === 0) throw notFound();
+  // Recorded first, so there is no moment where they are out but still able to rejoin.
+  await prisma.party.update({
+    where: { id: party.id },
+    data: { removedUserIds: { push: member.userId } },
+  });
+  await prisma.partyMember.deleteMany({ where: { id: member.id, partyId: party.id } });
 }
 
 // Ends a party for everyone. Only the player who started it may do this.
 export async function endParty(userId: string, code: string): Promise<void> {
   const party = await findParty(code);
 
-  if (party.hostId !== userId) {
-    throw new AppError(403, "PARTY_NOT_HOST", "Only the player who started this party can end it.");
-  }
+  requireHost(party, userId, "end it");
 
   // Deleting the party deletes its memberships with it.
   await prisma.party.delete({ where: { id: party.id } });
 }
 
-// Called when an account is deleted: ends the parties they host, and takes them out of the rest.
+// Called when an account is deleted. The parties they host pass to the next player,
+// and they are taken out of every party.
 export async function leaveAllParties(userId: string): Promise<void> {
-  await prisma.party.deleteMany({ where: { hostId: userId } });
+  const hosted = await prisma.party.findMany({
+    where: { hostId: userId },
+    include: { members: { orderBy: { joinedAt: "asc" } } },
+  });
+
+  for (const party of hosted) await handOverOrEnd(party, userId);
+
   await prisma.partyMember.deleteMany({ where: { userId } });
 }

@@ -83,10 +83,10 @@ function sortGames(games: SteamImportGame[], key: SortKey, descending: boolean) 
   );
 }
 
+// No time zone is set, so the month is the one on the reader's own calendar.
 const lastPlayedFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
   year: "numeric",
-  timeZone: "UTC",
 });
 
 const textLink =

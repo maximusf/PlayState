@@ -19,14 +19,20 @@ export function players(count: number): string {
   return `${count} ${count === 1 ? "player" : "players"}`;
 }
 
-const expiryFormat = new Intl.DateTimeFormat("en-US", {
-  weekday: "long",
-  hour: "numeric",
-  minute: "2-digit",
-});
+// Built on first use, in the browser, so it picks up the reader's own settings.
+// Building it when this file loads could use the server's settings instead.
+let expiryFormat: Intl.DateTimeFormat | null = null;
 
-// When a party ends, in the reader's own time zone. Parties last one day.
+// When a party ends, in the reader's own time zone and their 12 or 24 hour clock.
+// The day name stays in English, like the rest of the site. Parties last one day.
 export function expires(expiresAt: string): string {
+  expiryFormat ??= new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12,
+  });
+
   return `Expires ${expiryFormat.format(new Date(expiresAt))}`;
 }
 
@@ -90,7 +96,7 @@ export function PartiesView() {
       <h1 className="font-pixel text-6xl leading-[0.9] text-forest">Play together</h1>
       <p className="mt-4 text-lg text-slate">
         Start a party, send your friends the link, and see the multiplayer games you all own. A
-        party lasts one day, and you can host three at a time.
+        party lasts one day, and you can be in three at a time.
       </p>
 
       <div className="mt-8 px-1 pb-3">
