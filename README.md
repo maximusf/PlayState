@@ -187,15 +187,15 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/health` | No | Liveness check | 200 |
 | POST | `/api/webhooks/clerk` | Clerk signature | Deletes a user's library when Clerk reports their account was deleted | 200, 400 |
 | GET | `/api/stats` | No | How many players have a library, shown on the home page | 200 |
-| GET | `/api/catalog/search?q=` | No | Search IGDB by title (2 to 100 characters) | 200, 400, 502 |
-| GET | `/api/catalog/games/:igdbId` | No | Details for one game | 200, 400, 404, 502 |
+| GET | `/api/catalog/search?q=` | Yes | Search IGDB by title (2 to 100 characters). Rate limited | 200, 400, 401, 429, 502 |
+| GET | `/api/catalog/games/:igdbId` | Yes | Details for one game. Rate limited | 200, 400, 401, 404, 429, 502 |
 | GET | `/api/library` | Yes | The signed-in user's games | 200, 401 |
 | GET | `/api/library/count` | Yes | How many games the signed-in user has | 200, 401 |
 | GET | `/api/library/:id` | Yes | One library entry, with its IGDB summary and the picker choices that can suggest it | 200, 401, 404 |
 | PATCH | `/api/library/:id` | Yes | Set or clear how long the user usually plays this game, body `{ "sessionLength": "SHORT" }` | 200, 400, 401, 404 |
 | POST | `/api/library` | Yes | Add a game, body `{ "igdbId": 113112 }` | 201, 400, 401, 404, 409, 502 |
-| POST | `/api/library/import/steam` | Yes | Preview a Steam library, body `{ "profile": "https://steamcommunity.com/id/name" }`. Matches each Steam game to IGDB and flags the ones already owned. Saves nothing | 200, 400, 401, 404, 422, 502 |
-| POST | `/api/library/import` | Yes | Add many games at once, body `{ "igdbIds": [113112, 14593] }`. Games already in the library are skipped | 200, 400, 401, 502 |
+| POST | `/api/library/import/steam` | Yes | Preview a Steam library, body `{ "profile": "https://steamcommunity.com/id/name" }`. Matches each Steam game to IGDB and flags the ones already owned. Saves nothing. Limited to 5 loaded libraries an hour | 200, 400, 401, 404, 422, 429, 502 |
+| POST | `/api/library/import` | Yes | Add many games at once, body `{ "igdbIds": [113112, 14593] }`. Games already in the library are skipped. Limited to 3 imports an hour that add a game | 200, 400, 401, 429, 502 |
 | DELETE | `/api/library/:id` | Yes | Remove a library entry | 204, 401, 404 |
 | GET | `/api/parties` | Yes | Parties the signed-in user is in | 200, 401 |
 | POST | `/api/parties` | Yes | Start a party that lasts one day, body `{ "name": "Friday night", "displayName": "Max" }`. A player can be in three parties at once, hosted or joined. Rate limited | 201, 400, 401, 409, 429 |

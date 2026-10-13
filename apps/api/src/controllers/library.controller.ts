@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { getUserId } from "../middleware/auth.middleware";
+import { doNotCount } from "../middleware/rate-limit.middleware";
 import {
   AddLibraryGameSchema,
   ImportGamesSchema,
@@ -53,6 +54,9 @@ export async function previewSteam(req: Request, res: Response) {
 export async function importMany(req: Request, res: Response) {
   const { igdbIds } = ImportGamesSchema.parse(req.body);
   const result = await importGames(getUserId(res), igdbIds);
+
+  // An import that added nothing does not use up one of the player's imports for the hour.
+  if (result.added === 0) doNotCount(res);
 
   res.status(200).json({ data: result });
 }
