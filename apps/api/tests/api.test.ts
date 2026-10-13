@@ -182,12 +182,41 @@ describe("unknown routes", () => {
 describe("GET /api/catalog/search", () => {
   it("rejects a missing or too-short query with 400", async () => {
     for (const path of ["/api/catalog/search", "/api/catalog/search?q=%20a%20"]) {
-      const res = await request(app).get(path);
+      const res = await request(app).get(path).set("x-test-user", "user_a");
 
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("VALIDATION_ERROR");
     }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/catalog/search?q=hades");
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("UNAUTHORIZED");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rate limits catalog requests per player", async () => {
+    mockIgdb(() => json([]));
+    const find = (user: string) =>
+      request(app).get("/api/catalog/search?q=hades").set("x-test-user", user);
+
+    for (let attempt = 0; attempt < 90; attempt++) {
+      expect((await find("user_a")).status).toBe(200);
+    }
+    const blocked = await find("user_a");
+    // Search and game details share one allowance, as both spend IGDB requests.
+    const details = await request(app).get("/api/catalog/games/999").set("x-test-user", "user_a");
+    const someoneElse = await find("user_b");
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("RATE_LIMITED");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    expect(details.status).toBe(429);
+    // One player hitting the limit does not block another.
+    expect(someoneElse.status).toBe(200);
   });
 
   it("returns normalized results", async () => {
@@ -206,7 +235,7 @@ describe("GET /api/catalog/search", () => {
       ]),
     );
 
-    const res = await request(app).get("/api/catalog/search?q=hades");
+    const res = await request(app).get("/api/catalog/search?q=hades").set("x-test-user", "user_a");
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([
@@ -236,7 +265,7 @@ describe("GET /api/catalog/search", () => {
   it("escapes quotes in the search term", async () => {
     mockIgdb(() => json([]));
 
-    await request(app).get("/api/catalog/search").query({ q: 'ha"des' });
+    await request(app).get("/api/catalog/search").set("x-test-user", "user_a").query({ q: 'ha"des' });
 
     const igdbCall = fetchMock.mock.calls.find(([url]) => String(url).includes("igdb.com"));
     expect(igdbCall?.[1].body).toContain('search "ha\\"des";');
@@ -245,7 +274,7 @@ describe("GET /api/catalog/search", () => {
   it("asks IGDB to leave out DLC and special editions", async () => {
     mockIgdb(() => json([]));
 
-    await request(app).get("/api/catalog/search").query({ q: "hades" });
+    await request(app).get("/api/catalog/search").set("x-test-user", "user_a").query({ q: "hades" });
 
     const igdbCall = fetchMock.mock.calls.find(([url]) => String(url).includes("igdb.com"));
     expect(igdbCall?.[1].body).toContain("game_type = (0,4,8,9,10,11)");
@@ -255,7 +284,7 @@ describe("GET /api/catalog/search", () => {
   it("returns 502 when IGDB fails, without leaking upstream details", async () => {
     mockIgdb(() => json({ message: "upstream secret detail" }, 500));
 
-    const res = await request(app).get("/api/catalog/search?q=hades");
+    const res = await request(app).get("/api/catalog/search?q=hades").set("x-test-user", "user_a");
 
     expect(res.status).toBe(502);
     expect(res.body).toEqual({
@@ -266,7 +295,7 @@ describe("GET /api/catalog/search", () => {
   it("returns 502 when the network request throws", async () => {
     fetchMock.mockRejectedValue(new Error("network down"));
 
-    const res = await request(app).get("/api/catalog/search?q=hades");
+    const res = await request(app).get("/api/catalog/search?q=hades").set("x-test-user", "user_a");
 
     expect(res.status).toBe(502);
   });
@@ -275,7 +304,7 @@ describe("GET /api/catalog/search", () => {
     let igdbCalls = 0;
     mockIgdb(() => (++igdbCalls === 1 ? json({}, 401) : json([])));
 
-    const res = await request(app).get("/api/catalog/search?q=hades");
+    const res = await request(app).get("/api/catalog/search?q=hades").set("x-test-user", "user_a");
 
     expect(res.status).toBe(200);
     expect(igdbCalls).toBe(2);
@@ -284,15 +313,23 @@ describe("GET /api/catalog/search", () => {
 
 describe("GET /api/catalog/games/:igdbId", () => {
   it("rejects a non-numeric id with 400", async () => {
-    const res = await request(app).get("/api/catalog/games/abc");
+    const res = await request(app).get("/api/catalog/games/abc").set("x-test-user", "user_a");
 
     expect(res.status).toBe(400);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/catalog/games/999");
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("UNAUTHORIZED");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns 404 when IGDB has no such game", async () => {
     mockIgdb(() => json([]));
 
-    const res = await request(app).get("/api/catalog/games/999");
+    const res = await request(app).get("/api/catalog/games/999").set("x-test-user", "user_a");
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("GAME_NOT_FOUND");
@@ -393,7 +430,7 @@ describe("oversized input", () => {
     const long = "x".repeat(300);
     const responses = await Promise.all([
       request(app).get(`/api/library/${long}`).set("x-test-user", "user_a"),
-      request(app).get("/api/catalog/search").query({ q: long }),
+      request(app).get("/api/catalog/search").set("x-test-user", "user_a").query({ q: long }),
       request(app).post("/api/library/import/steam").set("x-test-user", "user_a").send({ profile: long }),
     ]);
 
@@ -783,6 +820,41 @@ describe("POST /api/library/import/steam", () => {
     expect(res.body.error.code).toBe("STEAM_UNAVAILABLE");
     expect(JSON.stringify([res.body, logged.mock.calls])).not.toContain("test-steam-key");
   });
+
+  it("allows each player 5 loaded libraries an hour", async () => {
+    mockSteamAndIgdb({ steam: { GetOwnedGames: steamLibrary }, igdb: { external_games: [] } });
+    db.userGame.findMany.mockResolvedValue([]);
+    const look = (user: string, profile = "76561197960287930") =>
+      request(app).post("/api/library/import/steam").set("x-test-user", user).send({ profile });
+
+    // A mistyped link does not use up a preview.
+    expect((await look("user_a", "not a profile!")).status).toBe(400);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await look("user_a")).status).toBe(200);
+    }
+    const steamCalls = fetchMock.mock.calls.length;
+    const blocked = await look("user_a");
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("RATE_LIMITED");
+    expect(blocked.body.error.message).toContain("this hour");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    // A blocked preview never reaches Steam or IGDB.
+    expect(fetchMock).toHaveBeenCalledTimes(steamCalls);
+    // One player hitting the limit does not block another.
+    expect((await look("user_b")).status).toBe(200);
+  });
+
+  it("rate limits failed previews per player", async () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      expect((await preview("not a profile!")).status).toBe(400);
+    }
+    const blocked = await preview("not a profile!");
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.message).toContain("too quickly");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+  });
 });
 
 describe("POST /api/library/import", () => {
@@ -867,6 +939,43 @@ describe("POST /api/library/import", () => {
 
     expect(res.status).toBe(200);
     expect(db.game.createMany.mock.calls[0][0].data[0].timeToBeatHours).toBeNull();
+  });
+
+  it("allows each player 3 imports an hour", async () => {
+    // Hades is already stored, so no import here needs IGDB.
+    db.game.findMany.mockResolvedValue([{ id: "game_1", igdbId: 113112 }]);
+    db.userGame.createMany.mockResolvedValue({ count: 1 });
+    const bring = (user: string) =>
+      request(app).post("/api/library/import").set("x-test-user", user).send({ igdbIds: [113112] });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect((await bring("user_a")).status).toBe(200);
+    }
+    const blocked = await bring("user_a");
+    const someoneElse = await bring("user_b");
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("RATE_LIMITED");
+    expect(blocked.body.error.message).toContain("this hour");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    // One player hitting the limit does not block another.
+    expect(someoneElse.status).toBe(200);
+    expect(db.userGame.createMany).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not count an import that added nothing, but rate limits repeating it", async () => {
+    db.game.findMany.mockResolvedValue([{ id: "game_1", igdbId: 113112 }]);
+    // Every game sent is already in the library.
+    db.userGame.createMany.mockResolvedValue({ count: 0 });
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      expect((await importGames({ igdbIds: [113112] })).status).toBe(200);
+    }
+    const blocked = await importGames({ igdbIds: [113112] });
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.message).toContain("too quickly");
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
   });
 });
 
