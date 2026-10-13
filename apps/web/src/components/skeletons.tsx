@@ -152,6 +152,21 @@ export function PickCardsSkeleton({ label }: { label: string }) {
   );
 }
 
+// The player count badge on the home page: an icon beside a big number and a label.
+export function PlayerCountSkeleton({ label }: { label: string }) {
+  return (
+    <Skeleton label={label}>
+      <div className="mx-1 mt-6 flex items-center gap-4 bg-surface p-3 pixel-frame [--frame:var(--color-fern)] sm:gap-5 sm:p-4">
+        <span className={`block size-14 shrink-0 ${bone}`} />
+        <span className="flex flex-col gap-2">
+          <Line className="h-12 w-20" />
+          <Line className="h-4 w-44" />
+        </span>
+      </div>
+    </Skeleton>
+  );
+}
+
 // A party page: its name, the players, then the games everyone owns.
 export function PartySkeleton({ label }: { label: string }) {
   return (

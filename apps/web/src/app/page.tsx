@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { auth } from "@clerk/nextjs/server";
 import { PixelIcon } from "@/components/pixel-icons";
 import { RandomDiceLink } from "@/components/random-dice-link";
+import { PlayerCountSkeleton } from "@/components/skeletons";
 
 // Set to false to hide the player count scoreboard under the hero shelf.
 const SHOW_PLAYER_COUNT = true;
@@ -167,7 +168,7 @@ export default async function Home() {
         <div>
           <Shelf />
           {SHOW_PLAYER_COUNT && (
-            <Suspense fallback={null}>
+            <Suspense fallback={<PlayerCountSkeleton label="Loading player count" />}>
               <PlayerCount />
             </Suspense>
           )}
