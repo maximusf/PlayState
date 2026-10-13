@@ -104,7 +104,8 @@ You also need:
 
 - a Clerk application (publishable key and secret key),
 - a Supabase project (pooled and direct connection strings),
-- a Twitch developer application (client ID and client secret) for IGDB.
+- a Twitch developer application (client ID and client secret) for IGDB,
+- a [Steam Web API key](https://steamcommunity.com/dev/apikey) if you want Steam library import. Everything else works without it.
 
 ```bash
 git clone https://github.com/maximusf/PlayState.git
@@ -156,6 +157,7 @@ Real values never belong in Git. Each app reads its own file.
 | `DIRECT_URL` | Supabase session connection (port 5432), used by Prisma migrations |
 | `TWITCH_CLIENT_ID` | Twitch application client ID |
 | `TWITCH_CLIENT_SECRET` | Twitch application client secret |
+| `STEAM_API_KEY` | Steam Web API key, used only for Steam library import |
 
 Only variables that start with `NEXT_PUBLIC_` reach the browser. No secret uses that prefix.
 
@@ -186,6 +188,8 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/library/:id` | Yes | One library entry, with its IGDB summary and the picker choices that can suggest it | 200, 401, 404 |
 | PATCH | `/api/library/:id` | Yes | Set or clear how long the user usually plays this game, body `{ "sessionLength": "SHORT" }` | 200, 400, 401, 404 |
 | POST | `/api/library` | Yes | Add a game, body `{ "igdbId": 113112 }` | 201, 400, 401, 404, 409, 502 |
+| POST | `/api/library/import/steam` | Yes | Preview a Steam library, body `{ "profile": "https://steamcommunity.com/id/name" }`. Matches each Steam game to IGDB and flags the ones already owned. Saves nothing | 200, 400, 401, 404, 422, 502 |
+| POST | `/api/library/import` | Yes | Add many games at once, body `{ "igdbIds": [113112, 14593] }`. Games already in the library are skipped | 200, 400, 401, 502 |
 | DELETE | `/api/library/:id` | Yes | Remove a library entry | 204, 401, 404 |
 | GET | `/api/recommendations/options` | Yes | How many library games each picker type can suggest | 200, 401 |
 | POST | `/api/recommendations` | Yes | Up to three suggestions | 200, 400, 401 |
@@ -206,7 +210,9 @@ Recommendation request:
 - `gameMode`: `SINGLE_PLAYER`, `MULTIPLAYER`, `EITHER`
 - `exclude`: optional list of library entry IDs to leave out. The picker sends the games it has already shown, so "Pick again" returns different ones.
 
-Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `INTERNAL_ERROR`.
+Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `INTERNAL_ERROR`.
+
+Steam import uses Steam only to learn which games a profile owns. All game data still comes from IGDB, so an imported game and a game added by hand are the same record and cannot appear twice. Steam shares a library only when the profile's Game details privacy setting is Public.
 
 ### How suggestions are scored
 

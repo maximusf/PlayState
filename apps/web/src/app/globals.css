@@ -81,6 +81,16 @@
   text-transform: uppercase;
 }
 
+/* Swaps the browser dropdown arrow, which sits against the edge, for a pixel one. */
+@utility pixel-select {
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%230f2d23' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  background-size: 0.875rem 0.5rem;
+}
+
 @layer components {
   .btn {
     display: inline-flex;

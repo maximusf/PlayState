@@ -7,6 +7,9 @@ export type ErrorCode =
   | "LIBRARY_ITEM_NOT_FOUND"
   | "EMPTY_LIBRARY"
   | "IGDB_UNAVAILABLE"
+  | "STEAM_UNAVAILABLE"
+  | "STEAM_PROFILE_NOT_FOUND"
+  | "STEAM_LIBRARY_HIDDEN"
   | "INTERNAL_ERROR";
 
 // An error the API expects and knows how to describe to a client.

@@ -2,13 +2,17 @@ import type { Request, Response } from "express";
 import { getUserId } from "../middleware/auth.middleware";
 import {
   AddLibraryGameSchema,
+  ImportGamesSchema,
   LibraryItemParamSchema,
   SessionLengthSchema,
+  SteamProfileSchema,
 } from "../schemas/library.schema";
 import {
   addGameToLibrary,
   getLibraryEntry,
+  importGames,
   listLibrary,
+  previewSteamImport,
   removeGameFromLibrary,
   setSessionLength,
 } from "../services/library.service";
@@ -31,6 +35,21 @@ export async function add(req: Request, res: Response) {
   const entry = await addGameToLibrary(getUserId(res), igdbId);
 
   res.status(201).json({ data: entry });
+}
+
+// Looks up a Steam library and reports what could be imported. Saves nothing.
+export async function previewSteam(req: Request, res: Response) {
+  const { profile } = SteamProfileSchema.parse(req.body);
+  const preview = await previewSteamImport(getUserId(res), profile);
+
+  res.status(200).json({ data: preview });
+}
+
+export async function importMany(req: Request, res: Response) {
+  const { igdbIds } = ImportGamesSchema.parse(req.body);
+  const result = await importGames(getUserId(res), igdbIds);
+
+  res.status(200).json({ data: result });
 }
 
 export async function updateSessionLength(req: Request, res: Response) {

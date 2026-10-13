@@ -8,7 +8,18 @@ const REQUEST_TIMEOUT_MS = 8000;
 // game_type keeps main games (0), standalone expansions (4), remakes (8), remasters (9),
 // expanded games (10), and ports (11). It drops DLC, packs, seasons, bundles, mods, and updates.
 // version_parent = null drops special editions of a game that is already listed.
-const PLAYABLE_GAMES = "game_type = (0,4,8,9,10,11) & version_parent = null";
+const PLAYABLE_GAME_TYPES = [0, 4, 8, 9, 10, 11];
+const PLAYABLE_GAMES = `game_type = (${PLAYABLE_GAME_TYPES.join(",")}) & version_parent = null`;
+
+// IGDB's ID for Steam in its list of external game sources.
+const STEAM_SOURCE = 1;
+// IGDB returns at most 500 rows per request. Batches stay under that with room to spare.
+const BATCH_SIZE = 400;
+const RATE_LIMIT_WAIT_MS = 1000;
+
+// Everything stored for a game. The summary is left out because it is large and never stored.
+const GAME_FIELDS =
+  "name,cover.image_id,genres.name,themes.name,game_modes.name,platforms.name,first_release_date";
 
 export type GameSearchResult = {
   igdbId: number;
@@ -46,6 +57,8 @@ type IgdbGame = {
   platforms?: IgdbNamed[];
   first_release_date?: number;
   summary?: string;
+  game_type?: number;
+  version_parent?: number;
   total_rating?: number;
   total_rating_count?: number;
 };
@@ -127,6 +140,12 @@ async function queryIgdb<T>(endpoint: string, query: string, isRetry = false): P
       return queryIgdb<T>(endpoint, query, true);
     }
 
+    // IGDB allows 4 requests a second. Wait out the limit and try once more.
+    if (response.status === 429 && !isRetry) {
+      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
+      return queryIgdb<T>(endpoint, query, true);
+    }
+
     if (!response.ok) {
       console.error(`IGDB request failed with status ${response.status}.`);
       throw unavailable();
@@ -154,6 +173,47 @@ function coverUrl(game: IgdbGame): string | null {
 function releaseDate(game: IgdbGame): Date | null {
   // IGDB uses Unix seconds.
   return game.first_release_date === undefined ? null : new Date(game.first_release_date * 1000);
+}
+
+function toGameDetails(game: IgdbGame): GameDetails {
+  return {
+    igdbId: game.id,
+    title: game.name ?? "Untitled",
+    coverUrl: coverUrl(game),
+    genres: names(game.genres),
+    themes: names(game.themes),
+    gameModes: names(game.game_modes),
+    platforms: names(game.platforms),
+    releaseDate: releaseDate(game)?.toISOString().slice(0, 10) ?? null,
+    summary: game.summary ?? null,
+  };
+}
+
+function isPlayable(game: IgdbGame): boolean {
+  return PLAYABLE_GAME_TYPES.includes(game.game_type ?? 0);
+}
+
+function batches<T>(items: T[]): T[][] {
+  const result: T[][] = [];
+  for (let start = 0; start < items.length; start += BATCH_SIZE) {
+    result.push(items.slice(start, start + BATCH_SIZE));
+  }
+  return result;
+}
+
+// Batches run one after another to stay inside IGDB's rate limit.
+async function queryGamesByIds(igdbIds: number[]): Promise<IgdbGame[]> {
+  const games: IgdbGame[] = [];
+
+  for (const batch of batches(igdbIds)) {
+    games.push(
+      ...(await queryGames(
+        `fields ${GAME_FIELDS},game_type,version_parent; where id = (${batch.join(",")}); limit 500;`,
+      )),
+    );
+  }
+
+  return games;
 }
 
 export function resetTokenCache(): void {
@@ -198,15 +258,75 @@ export async function getGameDetails(igdbId: number): Promise<GameDetails | null
 
   if (!game) return null;
 
-  return {
-    igdbId: game.id,
-    title: game.name ?? "Untitled",
-    coverUrl: coverUrl(game),
-    genres: names(game.genres),
-    themes: names(game.themes),
-    gameModes: names(game.game_modes),
-    platforms: names(game.platforms),
-    releaseDate: releaseDate(game)?.toISOString().slice(0, 10) ?? null,
-    summary: game.summary ?? null,
-  };
+  return toGameDetails(game);
+}
+
+// Details for many games at once. Games IGDB does not know are left out. Summaries are null.
+export async function getGamesDetails(igdbIds: number[]): Promise<GameDetails[]> {
+  return (await queryGamesByIds(igdbIds)).map(toGameDetails);
+}
+
+// Time to finish, in whole hours, for each game IGDB has a figure for.
+export async function getTimesToBeatHours(igdbIds: number[]): Promise<Map<number, number>> {
+  const hours = new Map<number, number>();
+
+  for (const batch of batches(igdbIds)) {
+    const rows = await queryIgdb<{ game_id?: number; normally?: number }>(
+      "game_time_to_beats",
+      `fields game_id,normally; where game_id = (${batch.join(",")}); limit 500;`,
+    );
+
+    for (const row of rows) {
+      if (row.game_id && row.normally) {
+        hours.set(row.game_id, Math.max(1, Math.round(row.normally / 3600)));
+      }
+    }
+  }
+
+  return hours;
+}
+
+// Finds the IGDB game behind each Steam app ID. Apps IGDB does not know, and apps that are
+// not playable games (DLC, soundtracks, tools), are left out of the result.
+export async function findGamesBySteamAppIds(appIds: number[]): Promise<Map<number, GameDetails>> {
+  const gameFields = `${GAME_FIELDS},game_type,version_parent`
+    .split(",")
+    .map((field) => `game.${field}`)
+    .join(",");
+  const linked = new Map<number, IgdbGame>();
+
+  for (const batch of batches(appIds)) {
+    const uids = batch.map((appId) => `"${appId}"`).join(",");
+    const rows = await queryIgdb<{ uid?: string; game?: IgdbGame }>(
+      "external_games",
+      `fields uid,${gameFields}; where external_game_source = ${STEAM_SOURCE} & uid = (${uids}); limit 500;`,
+    );
+
+    for (const row of rows) {
+      if (!row.uid || !row.game) continue;
+
+      // When IGDB links one app to several entries, a playable game wins over DLC.
+      const current = linked.get(Number(row.uid));
+      if (!current || (!isPlayable(current) && isPlayable(row.game))) {
+        linked.set(Number(row.uid), row.game);
+      }
+    }
+  }
+
+  // A special edition counts as the game it is an edition of, so it cannot be added twice.
+  const parentIds = new Set<number>();
+  for (const game of linked.values()) {
+    if (game.version_parent) parentIds.add(game.version_parent);
+  }
+  const parents = new Map(
+    (await queryGamesByIds([...parentIds])).map((game) => [game.id, game] as const),
+  );
+
+  const matches = new Map<number, GameDetails>();
+  for (const [appId, game] of linked) {
+    const resolved = game.version_parent ? parents.get(game.version_parent) : game;
+    if (resolved && isPlayable(resolved)) matches.set(appId, toGameDetails(resolved));
+  }
+
+  return matches;
 }

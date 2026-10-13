@@ -143,6 +143,16 @@ export function AddGameView() {
         </div>
       </form>
 
+      <p className="mt-5 px-1 text-muted">
+        Have a Steam library?{" "}
+        <Link
+          href="/library/import"
+          className="inline-flex min-h-11 items-center font-semibold text-forest underline underline-offset-4 hover:no-underline"
+        >
+          Import from Steam
+        </Link>
+      </p>
+
       <div className="mt-8" aria-live="polite">
         {search.status === "hint" && <Notice tone="info">{search.message}</Notice>}
 
@@ -165,7 +175,7 @@ export function AddGameView() {
               <select
                 value={sort}
                 onChange={(event) => setSort(event.target.value as SortKey)}
-                className="min-h-11 cursor-pointer bg-surface px-3 font-semibold text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
+                className="pixel-select min-h-11 cursor-pointer bg-surface pl-3 font-semibold text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
               >
                 {Object.entries(SORTS).map(([key, option]) => (
                   <option key={key} value={key}>
