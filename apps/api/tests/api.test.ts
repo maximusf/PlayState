@@ -13,10 +13,11 @@ const db = vi.hoisted(() => ({
     findMany: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     updateMany: vi.fn(),
     deleteMany: vi.fn(),
   },
-  game: { upsert: vi.fn(), update: vi.fn() },
+  game: { upsert: vi.fn(), update: vi.fn(), findMany: vi.fn(), createMany: vi.fn() },
 }));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
@@ -65,6 +66,7 @@ beforeEach(() => {
   resetTokenCache();
   process.env.TWITCH_CLIENT_ID = "test-client";
   process.env.TWITCH_CLIENT_SECRET = "test-secret";
+  process.env.STEAM_API_KEY = "test-steam-key";
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -249,6 +251,7 @@ describe("GET /api/library/:id", () => {
       expect.objectContaining({ where: { id: "entry_1", userId: "user_a" } }),
     );
     expect(res.body.data.summary).toBe("Escape the Underworld.");
+    expect(res.body.data.platforms).toEqual([]);
     expect(res.body.data.pickerChoices).toEqual(["Action", "RPG", "Single-player"]);
     expect(res.body.data.userId).toBeUndefined();
   });
@@ -409,6 +412,300 @@ describe("POST /api/library", () => {
     expect(res.body).toEqual({
       error: { code: "INTERNAL_ERROR", message: "Something went wrong." },
     });
+  });
+});
+
+// Routes each outgoing request to Twitch, Steam, or IGDB by its URL.
+// Steam replies are keyed by method name, IGDB replies by endpoint.
+function mockSteamAndIgdb(replies: {
+  steam?: Record<string, unknown>;
+  igdb?: Record<string, unknown[]>;
+}) {
+  fetchMock.mockImplementation(async (input: string) => {
+    const url = String(input);
+
+    if (url.includes("id.twitch.tv")) return json({ access_token: "token", expires_in: 3600 });
+
+    if (url.includes("api.steampowered.com")) {
+      const method = Object.keys(replies.steam ?? {}).find((name) => url.includes(name));
+      if (!method) return json({}, 500);
+
+      // A reply can be a function of the URL, for methods called with different options.
+      const reply = replies.steam?.[method];
+      return json({ response: typeof reply === "function" ? reply(url) : reply });
+    }
+
+    const endpoint = url.split("/").pop() ?? "";
+    return json(replies.igdb?.[endpoint] ?? []);
+  });
+}
+
+function igdbBodies(endpoint: string): string[] {
+  return fetchMock.mock.calls
+    .filter(([url]) => String(url).endsWith(`/v4/${endpoint}`))
+    .map(([, init]) => String(init.body));
+}
+
+const steamLibrary = {
+  games: [
+    { appid: 367520, name: "Hollow Knight", playtime_forever: 0 },
+    { appid: 1145360, name: "Hades", playtime_forever: 120 },
+    { appid: 378648, name: "The Witcher 3: Blood and Wine", playtime_forever: 300 },
+    { appid: 250820, name: "SteamVR", playtime_forever: 5 },
+  ],
+};
+
+const steamMatches = [
+  { uid: "1145360", game: { id: 113112, name: "Hades", game_type: 0, first_release_date: 1600300800 } },
+  { uid: "367520", game: { id: 14593, name: "Hollow Knight", game_type: 0 } },
+  { uid: "378648", game: { id: 13166, name: "Blood and Wine", game_type: 2 } },
+];
+
+describe("POST /api/library/import/steam", () => {
+  const preview = (profile: unknown) =>
+    request(app).post("/api/library/import/steam").set("x-test-user", "user_a").send({ profile });
+
+  it("requires authentication", async () => {
+    const res = await request(app).post("/api/library/import/steam").send({ profile: "gabe" });
+
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects input that is not a Steam profile with 400", async () => {
+    for (const profile of [undefined, "", "not a profile!", "https://example.com/id/gabe"]) {
+      const res = await preview(profile);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("matches Steam games to IGDB and flags the ones already in the library", async () => {
+    mockSteamAndIgdb({
+      steam: {
+        ResolveVanityURL: { success: 1, steamid: "76561197960287930" },
+        GetOwnedGames: steamLibrary,
+      },
+      igdb: { external_games: steamMatches },
+    });
+    // Hollow Knight was added by hand earlier.
+    db.userGame.findMany.mockResolvedValue([{ game: { igdbId: 14593 } }]);
+
+    const res = await preview("https://steamcommunity.com/id/gabe/");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.games).toEqual([
+      expect.objectContaining({
+        igdbId: 113112,
+        title: "Hades",
+        releaseYear: 2020,
+        playtimeMinutes: 120,
+        inLibrary: false,
+      }),
+      expect.objectContaining({
+        igdbId: 14593,
+        playtimeMinutes: 0,
+        lastPlayedAt: null,
+        inLibrary: true,
+      }),
+    ]);
+    // DLC and tools are not games a player would add.
+    expect(res.body.data.unmatched).toEqual(["SteamVR", "The Witcher 3: Blood and Wine"]);
+    expect(db.userGame.findMany.mock.calls[0][0].where.userId).toBe("user_a");
+    expect(igdbBodies("external_games")[0]).toContain(
+      'where external_game_source = 1 & uid = ("367520","1145360","378648","250820")',
+    );
+    expect(db.game.createMany).not.toHaveBeenCalled();
+    expect(db.userGame.createMany).not.toHaveBeenCalled();
+  });
+
+  it("uses a numeric Steam ID directly", async () => {
+    mockSteamAndIgdb({ steam: { GetOwnedGames: steamLibrary }, igdb: { external_games: [] } });
+    db.userGame.findMany.mockResolvedValue([]);
+
+    const res = await preview("https://steamcommunity.com/profiles/76561197960287930");
+
+    expect(res.status).toBe(200);
+    const steamUrls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(steamUrls.some((url) => url.includes("ResolveVanityURL"))).toBe(false);
+    expect(steamUrls.some((url) => url.includes("steamid=76561197960287930"))).toBe(true);
+  });
+
+  it("counts a special edition as the game it is an edition of", async () => {
+    mockSteamAndIgdb({
+      steam: {
+        GetOwnedGames: {
+          games: [
+            { appid: 1, name: "Hades", playtime_forever: 60, rtime_last_played: 1600300800 },
+            {
+              appid: 2,
+              name: "Hades: Deluxe Edition",
+              playtime_forever: 30,
+              rtime_last_played: 1700000000,
+            },
+          ],
+        },
+      },
+      igdb: {
+        external_games: [
+          { uid: "1", game: { id: 113112, name: "Hades", game_type: 0 } },
+          { uid: "2", game: { id: 500, name: "Hades: Deluxe Edition", version_parent: 113112 } },
+        ],
+        games: [{ id: 113112, name: "Hades", game_type: 0 }],
+      },
+    });
+    db.userGame.findMany.mockResolvedValue([]);
+
+    const res = await preview("76561197960287930");
+
+    expect(res.body.data.games).toHaveLength(1);
+    // Playtime is added up, and the most recent session of the two is kept.
+    expect(res.body.data.games[0]).toMatchObject({
+      igdbId: 113112,
+      playtimeMinutes: 90,
+      lastPlayedAt: "2023-11-14T22:13:20.000Z",
+    });
+    expect(res.body.data.unmatched).toEqual([]);
+  });
+
+  it("marks games the player never paid for as free", async () => {
+    const hades = { appid: 1145360, name: "Hades", playtime_forever: 120 };
+    const hollowKnight = { appid: 367520, name: "Hollow Knight", playtime_forever: 40 };
+
+    mockSteamAndIgdb({
+      steam: {
+        // Hollow Knight stands in for a free-to-play game: Steam only lists it when asked to.
+        GetOwnedGames: (url: string) => ({
+          games: url.includes("include_played_free_games=true") ? [hades, hollowKnight] : [hades],
+        }),
+      },
+      igdb: { external_games: steamMatches },
+    });
+    db.userGame.findMany.mockResolvedValue([]);
+
+    const res = await preview("76561197960287930");
+
+    expect(res.body.data.games).toEqual([
+      expect.objectContaining({ igdbId: 113112, free: false }),
+      expect.objectContaining({ igdbId: 14593, free: true }),
+    ]);
+  });
+
+  it("returns 404 when the profile name does not exist", async () => {
+    mockSteamAndIgdb({ steam: { ResolveVanityURL: { success: 42, message: "No match" } } });
+
+    const res = await preview("nobody-here");
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("STEAM_PROFILE_NOT_FOUND");
+  });
+
+  it("explains the privacy setting when Steam shares no games", async () => {
+    mockSteamAndIgdb({ steam: { GetOwnedGames: {} } });
+
+    const res = await preview("76561197960287930");
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe("STEAM_LIBRARY_HIDDEN");
+    expect(res.body.error.message).toContain("Game details to Public");
+  });
+
+  it("returns 502 when Steam fails, without leaking the API key", async () => {
+    mockSteamAndIgdb({});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await preview("76561197960287930");
+
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe("STEAM_UNAVAILABLE");
+    expect(JSON.stringify([res.body, logged.mock.calls])).not.toContain("test-steam-key");
+  });
+});
+
+describe("POST /api/library/import", () => {
+  const importGames = (body: unknown) =>
+    request(app)
+      .post("/api/library/import")
+      .set("x-test-user", "user_a")
+      .send(body as object);
+
+  it("requires authentication", async () => {
+    const res = await request(app).post("/api/library/import").send({ igdbIds: [1] });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects an invalid body with 400", async () => {
+    for (const body of [{}, { igdbIds: [] }, { igdbIds: "1" }, { igdbIds: [1.5] }, { igdbIds: [-1] }]) {
+      const res = await importGames(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect(db.userGame.createMany).not.toHaveBeenCalled();
+  });
+
+  it("stores only the games it has not seen and skips library duplicates", async () => {
+    mockSteamAndIgdb({
+      igdb: {
+        games: [{ id: 14593, name: "Hollow Knight", genres: [{ name: "Platform" }] }],
+        game_time_to_beats: [{ game_id: 14593, normally: 129814 }],
+      },
+    });
+    // Hades is already stored. Hollow Knight is new to PlayState.
+    db.game.findMany
+      .mockResolvedValueOnce([{ igdbId: 113112 }])
+      .mockResolvedValueOnce([{ id: "game_1" }, { id: "game_2" }]);
+    db.game.createMany.mockResolvedValue({ count: 1 });
+    // Hades is already in this user's library, so only one row is new.
+    db.userGame.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await importGames({ igdbIds: [113112, 14593, 14593], userId: "user_b" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ added: 1, skipped: 1 });
+    expect(igdbBodies("games")[0]).toContain("where id = (14593);");
+    expect(db.game.createMany.mock.calls[0][0]).toMatchObject({
+      data: [{ igdbId: 14593, title: "Hollow Knight", genres: ["Platform"], timeToBeatHours: 36 }],
+      skipDuplicates: true,
+    });
+    expect(db.userGame.createMany).toHaveBeenCalledWith({
+      data: [
+        { userId: "user_a", gameId: "game_1" },
+        { userId: "user_a", gameId: "game_2" },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it("does not call IGDB when every game is already stored", async () => {
+    db.game.findMany
+      .mockResolvedValueOnce([{ igdbId: 113112 }])
+      .mockResolvedValueOnce([{ id: "game_1" }]);
+    db.userGame.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await importGames({ igdbIds: [113112] });
+
+    expect(res.body.data).toEqual({ added: 1, skipped: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(db.game.createMany).not.toHaveBeenCalled();
+  });
+
+  it("still imports when time to beat is unavailable", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      const url = String(input);
+      if (url.includes("id.twitch.tv")) return json({ access_token: "token", expires_in: 3600 });
+      return url.endsWith("/game_time_to_beats") ? json({}, 500) : json([{ id: 14593, name: "Hollow Knight" }]);
+    });
+    db.game.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "game_2" }]);
+    db.userGame.createMany.mockResolvedValue({ count: 1 });
+
+    const res = await importGames({ igdbIds: [14593] });
+
+    expect(res.status).toBe(200);
+    expect(db.game.createMany.mock.calls[0][0].data[0].timeToBeatHours).toBeNull();
   });
 });
 

@@ -25,11 +25,21 @@ export function Notice({
   return (
     <div
       role={isError ? "alert" : "status"}
-      className={`border-l-4 px-4 py-3 ${
-        isError ? "border-danger bg-surface text-danger" : "border-emerald bg-surface text-forest"
+      className={`flex items-start gap-3 bg-surface p-3 ring-2 ring-inset ${
+        isError ? "text-danger ring-danger" : "text-forest ring-fern"
       }`}
     >
-      {children}
+      {/* A pixel "!" for errors and "i" for everything else. */}
+      <svg
+        viewBox="0 0 8 8"
+        className={`mt-0.5 size-6 shrink-0 ${isError ? "bg-danger" : "bg-forest"} fill-surface`}
+        shapeRendering="crispEdges"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d={isError ? "M3 1h2v4H3zM3 6h2v1H3z" : "M3 1h2v1H3zM3 3h2v4H3z"} />
+      </svg>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

@@ -37,8 +37,28 @@ export type LibraryEntry = {
 
 export type LibraryEntryDetail = LibraryEntry & {
   summary: string | null;
+  platforms: string[];
   pickerChoices: string[];
 };
+
+export type SteamImportGame = {
+  igdbId: number;
+  title: string;
+  coverUrl: string | null;
+  genres: string[];
+  releaseYear: number | null;
+  playtimeMinutes: number;
+  lastPlayedAt: string | null;
+  free: boolean;
+  inLibrary: boolean;
+};
+
+export type SteamImportPreview = {
+  games: SteamImportGame[];
+  unmatched: string[];
+};
+
+export type ImportResult = { added: number; skipped: number };
 
 export type Recommendation = {
   id: string;

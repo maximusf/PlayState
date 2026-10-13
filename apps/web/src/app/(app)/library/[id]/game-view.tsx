@@ -30,7 +30,20 @@ const SESSION_OPTIONS: { value: SessionLength | null; label: string }[] = [
   { value: null, label: "Not sure" },
 ];
 
-const dateFormat = new Intl.DateTimeFormat("en-US", {
+// IGDB's names for the computer platforms, and the short forms shown as badges.
+const COMPUTER_PLATFORMS: [igdbName: string, label: string][] = [
+  ["PC (Microsoft Windows)", "Windows"],
+  ["Mac", "Mac"],
+  ["Linux", "Linux"],
+];
+
+function computerPlatforms(platforms: string[]): string[] {
+  return COMPUTER_PLATFORMS.filter(([igdbName]) => platforms.includes(igdbName)).map(
+    ([, label]) => label,
+  );
+}
+
+const dateFormat =new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
@@ -199,6 +212,7 @@ export function GameView({ id }: { id: string }) {
                 <TagRow label="Genres" values={state.entry.game.genres.map(shortGenre)} />
                 <TagRow label="Themes" values={state.entry.game.themes} />
                 <TagRow label="Play" values={state.entry.game.gameModes} />
+                <TagRow label="Runs on" values={computerPlatforms(state.entry.platforms)} />
               </dl>
 
               <section className="mt-7">

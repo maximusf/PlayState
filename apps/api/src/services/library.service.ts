@@ -1,8 +1,15 @@
 import { Prisma } from "../generated/prisma/client";
 import { AppError } from "../lib/errors";
 import { prisma } from "../lib/prisma";
-import { getGameDetails, getTimeToBeatHours } from "./igdb.service";
+import {
+  findGamesBySteamAppIds,
+  getGameDetails,
+  getGamesDetails,
+  getTimesToBeatHours,
+  getTimeToBeatHours,
+} from "./igdb.service";
 import { matchingPickerChoices } from "./preferences";
+import { getOwnedGames, resolveSteamId } from "./steam.service";
 
 // Every library query loads the game with the entry.
 const withGame = { game: true } as const;
@@ -58,6 +65,7 @@ async function findOwnedEntry(userId: string, id: string): Promise<UserGameWithG
 
 export type LibraryEntryDetail = LibraryEntry & {
   summary: string | null;
+  platforms: string[];
   pickerChoices: string[];
 };
 
@@ -74,15 +82,13 @@ export async function getLibraryEntry(userId: string, id: string): Promise<Libra
     }
   }
 
-  // The summary is not stored. If IGDB is down, the page still works without it.
-  const summary = await getGameDetails(entry.game.igdbId).then(
-    (details) => details?.summary ?? null,
-    () => null,
-  );
+  // The summary and platforms are not stored. If IGDB is down, the page still works without them.
+  const details = await getGameDetails(entry.game.igdbId).catch(() => null);
 
   return {
     ...toLibraryEntry(entry),
-    summary,
+    summary: details?.summary ?? null,
+    platforms: details?.platforms ?? [],
     pickerChoices: matchingPickerChoices(entry.game),
   };
 }
@@ -128,6 +134,135 @@ export async function addGameToLibrary(userId: string, igdbId: number): Promise<
     }
     throw error;
   }
+}
+
+export type SteamImportPreview = {
+  games: {
+    igdbId: number;
+    title: string;
+    coverUrl: string | null;
+    genres: string[];
+    releaseYear: number | null;
+    playtimeMinutes: number;
+    // ISO timestamp of the last session on Steam. Null when never played or not shared.
+    lastPlayedAt: string | null;
+    // A free-to-play game on Steam that the player never paid for.
+    free: boolean;
+    inLibrary: boolean;
+  }[];
+  // Steam's own names for the apps IGDB could not place.
+  unmatched: string[];
+};
+
+export async function previewSteamImport(
+  userId: string,
+  profile: string,
+): Promise<SteamImportPreview> {
+  const owned = await getOwnedGames(await resolveSteamId(profile));
+  const matches = await findGamesBySteamAppIds(owned.map((game) => game.appId));
+
+  // Two Steam apps can be the same IGDB game, such as a game and its special edition.
+  // They become one row with their playtime added together.
+  const games = new Map<number, SteamImportPreview["games"][number]>();
+  const unmatched: string[] = [];
+
+  for (const steamGame of owned) {
+    const match = matches.get(steamGame.appId);
+
+    if (!match) {
+      unmatched.push(steamGame.name);
+      continue;
+    }
+
+    const existing = games.get(match.igdbId);
+    const lastPlayedAt = steamGame.lastPlayedAt?.toISOString() ?? null;
+
+    if (existing) {
+      existing.playtimeMinutes += steamGame.playtimeMinutes;
+      // ISO timestamps sort as text, so the later of the two is the larger string.
+      if (lastPlayedAt && lastPlayedAt > (existing.lastPlayedAt ?? "")) {
+        existing.lastPlayedAt = lastPlayedAt;
+      }
+      existing.free &&= steamGame.free;
+    } else {
+      games.set(match.igdbId, {
+        igdbId: match.igdbId,
+        title: match.title,
+        coverUrl: match.coverUrl,
+        genres: match.genres,
+        releaseYear: match.releaseDate ? Number(match.releaseDate.slice(0, 4)) : null,
+        playtimeMinutes: steamGame.playtimeMinutes,
+        lastPlayedAt,
+        free: steamGame.free,
+        inLibrary: false,
+      });
+    }
+  }
+
+  // A game added by hand has the same IGDB ID, so it shows up here as already owned.
+  const entries = await prisma.userGame.findMany({
+    where: { userId, game: { igdbId: { in: [...games.keys()] } } },
+    select: { game: { select: { igdbId: true } } },
+  });
+
+  for (const entry of entries) {
+    const game = games.get(entry.game.igdbId);
+    if (game) game.inLibrary = true;
+  }
+
+  return {
+    games: [...games.values()].sort(
+      (a, b) => b.playtimeMinutes - a.playtimeMinutes || a.title.localeCompare(b.title),
+    ),
+    unmatched: unmatched.sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+export type ImportResult = { added: number; skipped: number };
+
+export async function importGames(userId: string, igdbIds: number[]): Promise<ImportResult> {
+  const ids = [...new Set(igdbIds)];
+
+  const stored = await prisma.game.findMany({
+    where: { igdbId: { in: ids } },
+    select: { igdbId: true },
+  });
+  const storedIds = new Set(stored.map((game) => game.igdbId));
+  const missing = ids.filter((id) => !storedIds.has(id));
+
+  if (missing.length > 0) {
+    // Game data always comes from IGDB, never from the client.
+    const details = await getGamesDetails(missing);
+    // Time to beat is a nice-to-have. A failure here must not block the import.
+    const hours = await getTimesToBeatHours(missing).catch(() => new Map<number, number>());
+
+    await prisma.game.createMany({
+      data: details.map((game) => ({
+        igdbId: game.igdbId,
+        title: game.title,
+        timeToBeatHours: hours.get(game.igdbId) ?? null,
+        coverUrl: game.coverUrl,
+        releaseDate: game.releaseDate ? new Date(game.releaseDate) : null,
+        genres: game.genres,
+        themes: game.themes,
+        gameModes: game.gameModes,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  const games = await prisma.game.findMany({
+    where: { igdbId: { in: ids } },
+    select: { id: true },
+  });
+
+  // The (userId, gameId) unique constraint skips games already in the library.
+  const { count } = await prisma.userGame.createMany({
+    data: games.map((game) => ({ userId, gameId: game.id })),
+    skipDuplicates: true,
+  });
+
+  return { added: count, skipped: ids.length - count };
 }
 
 export async function setSessionLength(
