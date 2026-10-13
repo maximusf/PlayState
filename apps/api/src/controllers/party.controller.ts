@@ -5,8 +5,8 @@ import {
   JoinPartySchema,
   PartyCodeParamSchema,
   PartyMemberParamSchema,
-  RenamePartySchema,
   RollSchema,
+  UpdatePartySchema,
 } from "../schemas/party.schema";
 import {
   createParty,
@@ -19,7 +19,7 @@ import {
   listParties,
   recordRoll,
   removeMember,
-  renameParty,
+  updateParty,
 } from "../services/party.service";
 
 export async function list(_req: Request, res: Response) {
@@ -65,11 +65,11 @@ export async function roll(req: Request, res: Response) {
   res.status(200).json({ data: await recordRoll(getUserId(res), code, igdbId) });
 }
 
-export async function rename(req: Request, res: Response) {
+export async function update(req: Request, res: Response) {
   const { code } = PartyCodeParamSchema.parse(req.params);
-  const { name } = RenamePartySchema.parse(req.body);
+  const changes = UpdatePartySchema.parse(req.body);
 
-  res.status(200).json({ data: await renameParty(getUserId(res), code, name) });
+  res.status(200).json({ data: await updateParty(getUserId(res), code, changes) });
 }
 
 export async function remove(req: Request, res: Response) {

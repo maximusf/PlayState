@@ -39,7 +39,15 @@ export const CreatePartySchema = z.object({
 
 export const JoinPartySchema = z.object({ displayName });
 
-export const RenamePartySchema = z.object({ name: nameField("Party name", MAX_PARTY_NAME) });
+// The settings a host can change. Either may be sent on its own.
+export const UpdatePartySchema = z
+  .object({
+    name: nameField("Party name", MAX_PARTY_NAME).optional(),
+    ignoreLimits: z.boolean({ error: "ignoreLimits must be true or false." }).optional(),
+  })
+  .refine((changes) => changes.name !== undefined || changes.ignoreLimits !== undefined, {
+    message: "Send a name or ignoreLimits to change.",
+  });
 
 export const RollSchema = z.object({
   igdbId: z

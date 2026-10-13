@@ -54,21 +54,6 @@
   }
 }
 
-/* The strokes circling a winning game. Each one slides once round the outline of the frame, from
-   its own resting place, set by the WinnerTrace component. */
-@keyframes win-trace-run {
-  from {
-    stroke-dashoffset: var(--from);
-  }
-  to {
-    stroke-dashoffset: var(--to);
-  }
-}
-
-@utility win-trace-stroke {
-  animation: win-trace-run 3s linear infinite;
-}
-
 /* Stepped pixel corners, drawn with four hard shadows around the box. */
 @utility pixel-frame {
   box-shadow:

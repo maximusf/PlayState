@@ -10,6 +10,7 @@ import {
   type PartyDetail,
   type PartyInvite,
   type PartyRoll,
+  type PartySettings,
 } from "@/lib/api";
 import { useDiceRoll } from "@/lib/use-dice-roll";
 import { PixelIcon } from "@/components/pixel-icons";
@@ -27,8 +28,8 @@ type State =
 
 const backLink =
   "inline-flex min-h-11 items-center font-semibold text-forest underline underline-offset-4 hover:no-underline";
-const dangerLink =
-  "min-h-11 cursor-pointer px-2 font-semibold text-danger underline underline-offset-4 hover:no-underline disabled:opacity-60";
+// Leaving and ending are buttons like the rest, marked out by red text.
+const dangerLink = "btn btn-secondary text-danger";
 const plainLink =
   "min-h-11 cursor-pointer font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60";
 const chipButton =
@@ -39,6 +40,45 @@ const NO_REAL_LIMIT = 100;
 
 function playerLimit(maxPlayers: number | null): string | null {
   return maxPlayers === null || maxPlayers >= NO_REAL_LIMIT ? null : `Up to ${players(maxPlayers)}`;
+}
+
+// One colour per player. A party holds at most twelve, so nobody has to share.
+const MEMBER_COLOURS = [
+  "#e11d48",
+  "#ea580c",
+  "#d97706",
+  "#65a30d",
+  "#059669",
+  "#0d9488",
+  "#0284c7",
+  "#2563eb",
+  "#7c3aed",
+  "#c026d3",
+  "#db2777",
+  "#57534e",
+];
+
+// Gives each member a colour that looks random but is worked out from their member ID, so
+// everyone in the party sees the same colours and they survive a reload. Members are taken
+// in the order they joined. If two would land on the same colour, the later one moves along.
+function colourMembers(members: { id: string }[]): Map<string, string> {
+  const colours = new Map<string, string>();
+  const taken = new Set<number>();
+
+  for (const member of members) {
+    let hash = 0;
+    for (const character of member.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+
+    let index = hash % MEMBER_COLOURS.length;
+    while (taken.has(index) && taken.size < MEMBER_COLOURS.length) {
+      index = (index + 1) % MEMBER_COLOURS.length;
+    }
+
+    taken.add(index);
+    colours.set(member.id, MEMBER_COLOURS[index]);
+  }
+
+  return colours;
 }
 
 // How often an open party page checks whether anything has changed.
@@ -56,17 +96,33 @@ type Tile = {
 function PartyGames({
   party,
   path,
-  onRolled,
+  onChanged,
 }: {
   party: PartyDetail;
   path: string;
-  onRolled: (roll: PartyRoll) => void;
+  // Called with whatever the server says changed, so the page shows it straight away.
+  onChanged: (changes: PartyRoll | PartySettings) => void;
 }) {
   const api = useApi();
   const alone = party.memberCount === 1;
   const [sending, setSending] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
-  const [ignoreLimits, setIgnoreLimits] = useState(false);
+  // One setting for the whole party, changed only by the host.
+  const ignoreLimits = party.ignoreLimits;
+  const [savingLimits, setSavingLimits] = useState(false);
+
+  async function setIgnoreLimits(value: boolean) {
+    setSavingLimits(true);
+    setRollError(null);
+
+    try {
+      onChanged(await api<PartySettings>(path, { method: "PATCH", body: { ignoreLimits: value } }));
+    } catch (error) {
+      setRollError(`That setting was not saved. ${errorMessage(error)}`);
+    } finally {
+      setSavingLimits(false);
+    }
+  }
 
   // A game whose player limit is unknown counts as playable. Only a known, too-low limit rules
   // it out, and the party can choose to ignore limits, since they are sometimes wrong and a
@@ -99,6 +155,14 @@ function PartyGames({
     party.rolledIgdbId !== null && sharedIds.includes(party.rolledIgdbId) ? party.rolledIgdbId : null;
   const rolledId = dice.rolling ? dice.rolled : saved;
   const rolled = party.shared.find((game) => game.igdbId === rolledId) ?? null;
+  // The dice button shows only an icon, so its meaning is spelled out for hover and screen readers.
+  const diceLabel = dice.rolling
+    ? "Skip to the result"
+    : sending
+      ? "Rolling"
+      : rolled
+        ? "Roll the dice again"
+        : "Roll the dice to choose a game for the party";
 
   // The host's browser chooses, the server checks and saves it, and only then does the dice
   // play out, landing on the saved game. Every other member sees it within a few seconds.
@@ -113,7 +177,7 @@ function PartyGames({
     setRollError(null);
 
     try {
-      onRolled(await api<PartyRoll>(`${path}/roll`, { method: "POST", body: { igdbId: target } }));
+      onChanged(await api<PartyRoll>(`${path}/roll`, { method: "POST", body: { igdbId: target } }));
       dice.roll(pool, target);
     } catch (error) {
       setRollError(`The roll was not saved. ${errorMessage(error)}`);
@@ -124,57 +188,61 @@ function PartyGames({
 
   return (
     <section className="mt-10">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-        <div>
-          <h2 className="font-pixel text-4xl leading-none text-forest">
-            {alone ? "Your multiplayer games" : "Games"}
-          </h2>
-          {alone && (
-            <p className="mt-2 text-muted">
-              Send the invite link to a friend to see which of these you share.
-            </p>
-          )}
-        </div>
-        {/* Only the host rolls. Everyone else sees the button, so they know to ask. */}
-        {playable.length > 1 && (
-          <div className="flex flex-col items-end gap-1 px-1 pb-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <h2 className="font-pixel text-4xl leading-none text-forest">
+          {alone ? "Your multiplayer games" : "Games"}
+        </h2>
+        {/* Only the host rolls. Everyone else sees a note in its place, so they know to ask. */}
+        {playable.length > 1 && party.isHost && (
+          <span className="px-1 pb-2">
             <button
               type="button"
               // Pressing it again while the dice is hopping skips to the result.
               onClick={dice.rolling ? dice.skip : roll}
-              disabled={sending || !party.isHost}
-              aria-describedby={party.isHost ? undefined : "dice-host-only"}
-              className="btn btn-primary"
+              disabled={sending}
+              aria-label={diceLabel}
+              title={diceLabel}
+              className="btn btn-primary w-11 px-0"
             >
               <PixelIcon name="dice" className="size-6" />
-              {dice.rolling ? "Skip" : sending ? "Rolling" : rolled ? "Roll again" : "Roll the dice"}
             </button>
-            {!party.isHost && (
-              <p id="dice-host-only" className="text-sm text-muted">
-                Only the host can roll.
-              </p>
-            )}
-          </div>
+          </span>
+        )}
+        {playable.length > 1 && !party.isHost && (
+          <p className="flex items-center gap-2 text-muted">
+            <PixelIcon name="dice" className="size-6" />
+            The host rolls the dice.
+          </p>
         )}
       </div>
+      {alone && (
+        <p className="mt-2 text-muted">
+          Send the invite link to a friend to see which of these you share.
+        </p>
+      )}
 
-      {/* Always offered once the party shares a game, with a note on what it would change. */}
-      {party.shared.length > 0 && (
+      {/* The host's setting for the whole party, with a note on what it would change. */}
+      {party.shared.length > 0 && party.isHost && (
         <label className="mt-4 flex min-h-11 cursor-pointer flex-wrap items-center gap-x-3 font-semibold text-forest">
           <input
             type="checkbox"
             checked={ignoreLimits}
             onChange={(event) => setIgnoreLimits(event.target.checked)}
-            disabled={rolling}
+            disabled={rolling || savingLimits}
             className="size-6 shrink-0 cursor-pointer accent-emerald"
           />
-          Ignore player limits
+          Ignore player limits for everyone
           <span className="font-normal text-muted">
             {overLimit.length === 0
               ? "No shared game is over its limit right now"
               : `Adds ${overLimit.length} ${overLimit.length === 1 ? "game" : "games"} too small for ${players(party.memberCount)}`}
           </span>
         </label>
+      )}
+
+      {/* Everyone else is told when the host has switched limits off. */}
+      {ignoreLimits && !party.isHost && (
+        <p className="mt-4 text-muted">The host is ignoring player limits for this party.</p>
       )}
 
       {rollError && (
@@ -408,8 +476,8 @@ export function PartyView({ code }: { code: string }) {
     setActionError(null);
 
     try {
-      const { name } = await api<{ name: string }>(path, { method: "PATCH", body: { name: newName } });
-      setState({ status: "ready", party: { ...state.party, name } });
+      const changes = await api<PartySettings>(path, { method: "PATCH", body: { name: newName } });
+      setState({ status: "ready", party: { ...state.party, ...changes } });
       setNewName(null);
     } catch (error) {
       setActionError(`The party was not renamed. ${errorMessage(error)}`);
@@ -450,6 +518,8 @@ export function PartyView({ code }: { code: string }) {
       setConfirming(null);
     }
   }
+
+  const memberColours = colourMembers(state.status === "ready" ? state.party.members : []);
 
   // Who takes over if the host leaves: the player who has been in the party longest.
   // The API lists members in the order they joined.
@@ -595,14 +665,11 @@ export function PartyView({ code }: { code: string }) {
                   </form>
                 )}
               </div>
-              <div className="flex flex-col items-end gap-1">
-                <div className="px-1 pb-3">
-                  <button type="button" onClick={copyLink} className="btn btn-primary">
-                    {copied ? "Link copied" : "Copy invite link"}
-                  </button>
-                </div>
-                {/* Leaving and ending sit at the top, where they can be found without scrolling. */}
-                <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-1">
+              {/* One row of actions: share the party, then the ways out of it. */}
+              <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-4 px-1 pb-3">
+                <button type="button" onClick={copyLink} className="btn btn-primary">
+                  {copied ? "Link copied" : "Copy invite link"}
+                </button>
                   {confirming === null && (
                     <>
                       {/* A host who is alone has nobody to hand the party to, so they can only end it. */}
@@ -643,13 +710,12 @@ export function PartyView({ code }: { code: string }) {
                         type="button"
                         onClick={() => setConfirming(null)}
                         disabled={leaving}
-                        className={plainLink}
+                        className="btn btn-secondary"
                       >
                         {confirming === "leave" ? "Stay" : "Keep it"}
                       </button>
                     </>
                   )}
-                </div>
               </div>
             </div>
 
@@ -663,6 +729,14 @@ export function PartyView({ code }: { code: string }) {
                       : "bg-surface text-forest ring-2 ring-fern ring-inset"
                   }`}
                 >
+                  {/* A little person in this member's own colour. It sits on a light tile so the
+                      colour reads the same on the dark name tag and the light ones. */}
+                  <span
+                    className="inline-flex size-7 shrink-0 items-center justify-center bg-surface"
+                    style={{ color: memberColours.get(member.id) }}
+                  >
+                    <PixelIcon name="singlePlayer" className="size-6" />
+                  </span>
                   {removingId === member.id ? (
                     <>
                       <span role="status">Remove {member.displayName}?</span>
@@ -715,10 +789,10 @@ export function PartyView({ code }: { code: string }) {
             <PartyGames
               party={state.party}
               path={path}
-              onRolled={(roll) =>
+              onChanged={(changes) =>
                 setState((current) =>
                   current.status === "ready"
-                    ? { status: "ready", party: { ...current.party, ...roll } }
+                    ? { status: "ready", party: { ...current.party, ...changes } }
                     : current,
                 )
               }

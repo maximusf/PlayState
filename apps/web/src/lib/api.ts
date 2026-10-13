@@ -97,11 +97,15 @@ export type PartyDetail = PartySummary & {
   // The host's latest dice roll, the same for every member.
   rolledIgdbId: number | null;
   rolledAt: string | null;
+  // The host's setting: games too small for the group still count as playable.
+  ignoreLimits: boolean;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
 
 export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
+
+export type PartySettings = { name: string; ignoreLimits: boolean; version: string };
 
 export type Recommendation = {
   id: string;

@@ -48,9 +48,13 @@ export type PartyDetail = PartySummary & {
   // The host's latest dice roll, so every member sees the same result.
   rolledIgdbId: number | null;
   rolledAt: string | null;
+  // The host's setting: games too small for the group still count as playable.
+  ignoreLimits: boolean;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
+
+export type PartySettings = { name: string; ignoreLimits: boolean; version: string };
 
 export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
 
@@ -71,17 +75,19 @@ type VersionedParty = {
   hostId: string;
   rolledIgdbId: number | null;
   rolledAt: Date | null;
+  ignoreLimits: boolean;
   members: { id: string; displayName: string }[];
 };
 
 // A short fingerprint of everything members can see change: the name, the host,
-// who is in the party, and the latest roll.
+// who is in the party, the latest roll, and the host's settings.
 function versionOf(party: VersionedParty): string {
   const visible = [
     party.name,
     party.hostId,
     party.rolledIgdbId,
     party.rolledAt?.getTime() ?? null,
+    party.ignoreLimits,
     party.members.map((member) => [member.id, member.displayName]),
   ];
 
@@ -304,6 +310,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     others: others.sort(byTitle),
     rolledIgdbId: party.rolledIgdbId,
     rolledAt: party.rolledAt?.toISOString() ?? null,
+    ignoreLimits: party.ignoreLimits,
     version: versionOf(party),
   };
 }
@@ -380,13 +387,24 @@ function requireHost(party: { hostId: string }, userId: string, action: string):
   }
 }
 
-export async function renameParty(userId: string, code: string, name: string): Promise<{ name: string }> {
+// Changes the party's name, its player limit setting, or both. Only what is sent changes.
+export async function updateParty(
+  userId: string,
+  code: string,
+  changes: { name?: string; ignoreLimits?: boolean },
+): Promise<PartySettings> {
   const party = await findParty(code);
-  requireHost(party, userId, "rename it");
+  requireHost(party, userId, "change its settings");
 
-  await prisma.party.update({ where: { id: party.id }, data: { name } });
+  await prisma.party.update({ where: { id: party.id }, data: changes });
 
-  return { name };
+  const updated = { ...party, ...changes };
+
+  return {
+    name: updated.name,
+    ignoreLimits: updated.ignoreLimits,
+    version: versionOf(updated),
+  };
 }
 
 // Takes a player out of the party and stops them rejoining with the link.

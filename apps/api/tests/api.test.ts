@@ -914,6 +914,7 @@ describe("parties", () => {
     removedUserIds: [] as string[],
     rolledIgdbId: null as number | null,
     rolledAt: null as Date | null,
+    ignoreLimits: false,
     createdAt: new Date(),
     members,
   });
@@ -1335,12 +1336,47 @@ describe("parties", () => {
     expect(byMember.body.error.code).toBe("PARTY_NOT_HOST");
     expect(tooLong.status).toBe(400);
     expect(byHost.status).toBe(200);
-    expect(byHost.body.data).toEqual({ name: "Saturday night" });
+    expect(byHost.body.data).toMatchObject({ name: "Saturday night", ignoreLimits: false });
     expect(db.party.update).toHaveBeenCalledTimes(1);
     expect(db.party.update).toHaveBeenCalledWith({
       where: { id: "party_1" },
       data: { name: "Saturday night" },
     });
+  });
+
+  it("lets only the host set whether player limits are ignored, for the whole party", async () => {
+    const current = party(member("user_a", "Max"), member("user_b", "Sam"));
+    db.party.findUnique.mockResolvedValue(current);
+    const set = (user: string, body: object) =>
+      request(app).patch(`/api/parties/${CODE}`).set("x-test-user", user).send(body);
+
+    const byMember = await set("user_b", { ignoreLimits: true });
+    const notBoolean = await set("user_a", { ignoreLimits: "yes" });
+    const nothing = await set("user_a", {});
+
+    expect(byMember.status).toBe(403);
+    expect(byMember.body.error.code).toBe("PARTY_NOT_HOST");
+    expect(notBoolean.status).toBe(400);
+    expect(nothing.status).toBe(400);
+    expect(db.party.update).not.toHaveBeenCalled();
+
+    const byHost = await set("user_a", { ignoreLimits: true });
+
+    expect(byHost.status).toBe(200);
+    // The name is left alone when only the setting is sent.
+    expect(byHost.body.data).toMatchObject({ name: "Friday night", ignoreLimits: true });
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { ignoreLimits: true },
+    });
+
+    // The change gives the party a new version, so every open page picks it up.
+    const before = await request(app).get(`/api/parties/${CODE}/version`).set("x-test-user", "user_b");
+    db.party.findUnique.mockResolvedValue({ ...current, ignoreLimits: true });
+    const after = await request(app).get(`/api/parties/${CODE}/version`).set("x-test-user", "user_b");
+
+    expect(after.body.data.version).not.toBe(before.body.data.version);
+    expect(after.body.data.version).toBe(byHost.body.data.version);
   });
 
   it("lets only the host remove a player, and never themselves", async () => {
