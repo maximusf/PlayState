@@ -10,6 +10,7 @@ export type ErrorCode =
   | "STEAM_UNAVAILABLE"
   | "STEAM_PROFILE_NOT_FOUND"
   | "STEAM_LIBRARY_HIDDEN"
+  | "WEBHOOK_INVALID"
   | "INTERNAL_ERROR";
 
 // An error the API expects and knows how to describe to a client.

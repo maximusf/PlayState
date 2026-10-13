@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Figtree, Jersey_10 } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
 
@@ -47,9 +48,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
             {children}
           </main>
-          <footer className="mx-auto w-full max-w-6xl px-4 py-6 text-sm text-muted sm:px-6">
-            Game data provided by IGDB.
-          </footer>
+          <SiteFooter />
         </body>
       </html>
     </ClerkProvider>

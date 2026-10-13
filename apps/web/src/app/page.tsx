@@ -1,10 +1,20 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Suspense } from "react";
 import { auth } from "@clerk/nextjs/server";
+import { PixelIcon } from "@/components/pixel-icons";
+
+// Set to false to hide the player count scoreboard under the hero shelf.
+const SHOW_PLAYER_COUNT = true;
+// How long the home page reuses a count before asking the API again, in seconds.
+const PLAYER_COUNT_TTL = 300;
+
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 
 const COVER_BASE = "https://images.igdb.com/igdb/image/upload/t_cover_big";
 
 // The shelf in the hero: twelve IGDB covers, three of them picked.
+// Hovering a cover eases it upward, and fades a greyed-out one back to full colour.
 const SHELF: { title: string; image: string; pick?: boolean }[] = [
   { title: "Hades", image: "cob9kr" },
   { title: "Minecraft", image: "co8fu7", pick: true },
@@ -53,7 +63,9 @@ function Shelf() {
         {SHELF.map((game) => (
           <div
             key={game.title}
-            className={`relative aspect-[3/4] bg-fern/50 ${game.pick ? "ring-4 ring-emerald" : ""}`}
+            className={`group relative aspect-[3/4] bg-fern/50 transition duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:shadow-[0_8px_0_0_var(--color-forest)] ${
+              game.pick ? "ring-4 ring-emerald" : "hover:ring-4 hover:ring-forest"
+            }`}
           >
             {/* Decorative: the whole shelf is hidden from assistive technology. */}
             <Image
@@ -61,7 +73,9 @@ function Shelf() {
               alt=""
               fill
               sizes="(min-width: 768px) 120px, 22vw"
-              className={`object-cover ${game.pick ? "" : "opacity-35 grayscale"}`}
+              className={`object-cover transition duration-200 ease-out ${
+                game.pick ? "" : "opacity-35 grayscale group-hover:opacity-100 group-hover:grayscale-0"
+              }`}
               unoptimized
             />
             {game.pick && (
@@ -73,6 +87,40 @@ function Shelf() {
         ))}
       </div>
     </div>
+  );
+}
+
+// The badge loads on its own, so a slow or sleeping API never holds up the page.
+// If the count cannot be fetched, the badge is left out.
+async function PlayerCount() {
+  let players: number;
+
+  try {
+    const response = await fetch(`${API_URL}/api/stats`, {
+      next: { revalidate: PLAYER_COUNT_TTL },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return null;
+
+    players = (await response.json()).data.players;
+  } catch {
+    return null;
+  }
+
+  if (!Number.isInteger(players) || players < 1) return null;
+
+  return (
+    <p className="mx-1 mt-6 flex items-center gap-4 bg-emerald p-3 text-forest pixel-frame sm:gap-5 sm:p-4">
+      <span className="flex size-14 shrink-0 items-center justify-center bg-forest text-mint">
+        <PixelIcon name="multiplayer" className="size-9" />
+      </span>
+      <span className="flex flex-col gap-2">
+        <span className="font-pixel text-6xl leading-[0.8]">{players.toLocaleString("en-US")}</span>
+        <span className="pixel-label">
+          {players === 1 ? "player uses" : "players use"} PlayState
+        </span>
+      </span>
+    </p>
   );
 }
 
@@ -114,7 +162,14 @@ export default async function Home() {
           </div>
         </div>
 
-        <Shelf />
+        <div>
+          <Shelf />
+          {SHOW_PLAYER_COUNT && (
+            <Suspense fallback={null}>
+              <PlayerCount />
+            </Suspense>
+          )}
+        </div>
       </div>
 
       <section

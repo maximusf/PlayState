@@ -4,6 +4,8 @@ import { clerkMiddleware } from "@clerk/express";
 import catalogRoutes from "./routes/catalog.routes";
 import libraryRoutes from "./routes/library.routes";
 import recommendationRoutes from "./routes/recommendation.routes";
+import statsRoutes from "./routes/stats.routes";
+import webhookRoutes from "./routes/webhook.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 
 const app = express();
@@ -16,6 +18,10 @@ const allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:3000")
   .filter(Boolean);
 
 app.use(cors({ origin: allowedOrigins }));
+
+// Mounted before express.json() because webhook signatures need the raw request body.
+app.use("/api/webhooks", webhookRoutes);
+
 app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
@@ -31,6 +37,7 @@ app.use(clerkMiddleware());
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/recommendations", recommendationRoutes);
+app.use("/api/stats", statsRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

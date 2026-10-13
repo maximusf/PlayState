@@ -72,7 +72,7 @@ export function AddGameView() {
     return compare ? [...search.games].sort(compare) : search.games;
   }, [search, sort]);
 
-  async function onSubmit(event: React.FormEvent) {
+  async function onSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const term = query.trim();
 

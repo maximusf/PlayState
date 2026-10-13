@@ -167,7 +167,7 @@ export function ImportSteamView() {
     });
   }
 
-  async function onSubmit(event: React.FormEvent) {
+  async function onSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = profile.trim();
 
