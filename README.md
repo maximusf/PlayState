@@ -200,7 +200,7 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | POST | `/api/parties` | Yes | Start a party that lasts one day, body `{ "name": "Friday night", "displayName": "Max" }`. A player can be in three parties at once, hosted or joined. Rate limited | 201, 400, 401, 409, 429 |
 | GET | `/api/parties/:code/invite` | Yes | A party's name and size, for someone deciding whether to join | 200, 401, 404 |
 | POST | `/api/parties/:code/members` | Yes | Join a party, body `{ "displayName": "Sam" }`. Rate limited | 200, 400, 401, 404, 409, 429 |
-| GET | `/api/parties/:code` | Members | The multiplayer games every member owns, and the ones a single member is missing, each with its player limit when IGDB has one | 200, 401, 403, 404 |
+| GET | `/api/parties/:code` | Members | The multiplayer games every member owns and the ones a single member is missing, each with its player limit when IGDB has one, plus the viewer's own remaining multiplayer games | 200, 401, 403, 404 |
 | DELETE | `/api/parties/:code/members/me` | Yes | Leave a party. When the host leaves, the longest-standing member becomes host, and a host who is alone ends the party | 204, 401, 404 |
 | PATCH | `/api/parties/:code` | Host | Rename a party, body `{ "name": "Saturday night" }` | 200, 400, 401, 403, 404 |
 | DELETE | `/api/parties/:code/members/:memberId` | Host | Remove a player, who can then no longer rejoin with the link | 204, 401, 403, 404, 409 |

@@ -1203,8 +1203,10 @@ describe("parties", () => {
       }),
     ]);
     expect(res.body.data.almost).toEqual([
-      expect.objectContaining({ title: "Portal 2", missing: "Rio", maxPlayers: null }),
+      expect.objectContaining({ title: "Portal 2", missing: "Rio", missingIsYou: false, maxPlayers: null }),
     ]);
+    // Rocket League is only in the viewer's own library, so only the viewer is shown it.
+    expect(res.body.data.others).toEqual([expect.objectContaining({ title: "Rocket League" })]);
     expect(res.body.data.members).toEqual([
       { id: "member_max", displayName: "Max", isYou: true, isHost: true },
       { id: "member_sam", displayName: "Sam", isYou: false, isHost: false },
@@ -1238,6 +1240,11 @@ describe("parties", () => {
 
     expect(res.body.data.shared).toEqual([]);
     expect(res.body.data.almost).toEqual([]);
+    expect(res.body.data.others).toEqual([expect.objectContaining({ title: "Halo Infinite" })]);
+
+    // The other player does not own it, so it must not appear on their page at all.
+    const theirs = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_b");
+    expect(theirs.body.data.others).toEqual([]);
   });
 
   it("lets a member leave without ending the party", async () => {
