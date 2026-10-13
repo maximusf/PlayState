@@ -135,9 +135,9 @@ function PartyGames({ party }: { party: PartyDetail }) {
         )}
       </div>
 
-      {/* Offered only when a limit is actually holding a shared game back. */}
-      {overLimit.length > 0 && (
-        <label className="mt-4 flex min-h-11 cursor-pointer items-center gap-3 font-semibold text-forest">
+      {/* Always offered once the party shares a game, with a note on what it would change. */}
+      {party.shared.length > 0 && (
+        <label className="mt-4 flex min-h-11 cursor-pointer flex-wrap items-center gap-x-3 font-semibold text-forest">
           <input
             type="checkbox"
             checked={ignoreLimits}
@@ -145,7 +145,12 @@ function PartyGames({ party }: { party: PartyDetail }) {
             disabled={rolling}
             className="size-6 shrink-0 cursor-pointer accent-emerald"
           />
-          Ignore player limits ({overLimit.length} more {overLimit.length === 1 ? "game" : "games"})
+          Ignore player limits
+          <span className="font-normal text-muted">
+            {overLimit.length === 0
+              ? "No shared game is over its limit right now"
+              : `Adds ${overLimit.length} ${overLimit.length === 1 ? "game" : "games"} too small for ${players(party.memberCount)}`}
+          </span>
         </label>
       )}
 
@@ -183,20 +188,25 @@ function PartyGames({ party }: { party: PartyDetail }) {
             const isRolled = tile.igdbId === rolledId;
 
             return (
-              <li key={tile.igdbId} className="flex flex-col gap-2">
+              <li key={tile.igdbId} className="group flex flex-col gap-2">
+                {/* Hovering lifts a cover, like in the library. The dice lifts its pick the same way. */}
                 <span
-                  className={`relative block ring-4 transition duration-100 ease-out ${
+                  className={`relative block ring-4 transition duration-150 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)] ${
                     isRolled
                       ? "-translate-y-1 shadow-[0_8px_0_0_var(--color-forest)] ring-emerald"
                       : tile.playable
-                        ? "ring-forest"
-                        : "ring-fern/60"
+                        ? "ring-forest group-hover:ring-emerald"
+                        : "ring-fern/60 group-hover:ring-forest"
                   }`}
                 >
                   <GameCover
                     title={tile.title}
                     coverUrl={tile.coverUrl}
-                    className={tile.playable ? "" : "opacity-35 grayscale"}
+                    className={
+                      tile.playable
+                        ? ""
+                        : "opacity-35 grayscale transition duration-150 ease-out group-hover:opacity-100 group-hover:grayscale-0"
+                    }
                   />
                   {isRolled && !rolling && (
                     <span className="absolute bottom-1.5 left-1.5 bg-emerald px-1.5 font-pixel text-base leading-tight text-forest">
@@ -507,10 +517,61 @@ export function PartyView({ code }: { code: string }) {
                   </form>
                 )}
               </div>
-              <div className="px-1 pb-3">
-                <button type="button" onClick={copyLink} className="btn btn-primary">
-                  {copied ? "Link copied" : "Copy invite link"}
-                </button>
+              <div className="flex flex-col items-end gap-1">
+                <div className="px-1 pb-3">
+                  <button type="button" onClick={copyLink} className="btn btn-primary">
+                    {copied ? "Link copied" : "Copy invite link"}
+                  </button>
+                </div>
+                {/* Leaving and ending sit at the top, where they can be found without scrolling. */}
+                <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-1">
+                  {confirming === null && (
+                    <>
+                      {/* A host who is alone has nobody to hand the party to, so they can only end it. */}
+                      {(!state.party.isHost || nextHost) && (
+                        <button
+                          type="button"
+                          onClick={() => (state.party.isHost ? setConfirming("leave") : leaveOrEnd(false))}
+                          disabled={leaving}
+                          className={dangerLink}
+                        >
+                          {leaving ? "Leaving" : "Leave party"}
+                        </button>
+                      )}
+                      {state.party.isHost && (
+                        <button type="button" onClick={() => setConfirming("end")} className={dangerLink}>
+                          End party
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {confirming !== null && (
+                    <>
+                      <p role="status" className="font-semibold text-forest">
+                        {confirming === "leave"
+                          ? `Leave this party? ${nextHost?.displayName} will become the host.`
+                          : `End this party for all ${players(state.party.memberCount)}?`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => leaveOrEnd(confirming === "end")}
+                        disabled={leaving}
+                        className={dangerLink}
+                      >
+                        {leaving ? "Working" : confirming === "leave" ? "Yes, leave" : "Yes, end it"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirming(null)}
+                        disabled={leaving}
+                        className={plainLink}
+                      >
+                        {confirming === "leave" ? "Stay" : "Keep it"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -574,55 +635,6 @@ export function PartyView({ code }: { code: string }) {
             )}
 
             <PartyGames party={state.party} />
-
-            <div className="mt-12 flex flex-wrap items-center gap-x-5 gap-y-2 border-t-4 border-dotted border-fern pt-4">
-              {confirming === null && (
-                <>
-                  {/* A host who is alone has nobody to hand the party to, so they can only end it. */}
-                  {(!state.party.isHost || nextHost) && (
-                    <button
-                      type="button"
-                      onClick={() => (state.party.isHost ? setConfirming("leave") : leaveOrEnd(false))}
-                      disabled={leaving}
-                      className={dangerLink}
-                    >
-                      {leaving ? "Leaving" : "Leave party"}
-                    </button>
-                  )}
-                  {state.party.isHost && (
-                    <button type="button" onClick={() => setConfirming("end")} className={dangerLink}>
-                      End party
-                    </button>
-                  )}
-                </>
-              )}
-
-              {confirming !== null && (
-                <>
-                  <p role="status" className="font-semibold text-forest">
-                    {confirming === "leave"
-                      ? `Leave this party? ${nextHost?.displayName} will become the host.`
-                      : `End this party for all ${players(state.party.memberCount)}?`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => leaveOrEnd(confirming === "end")}
-                    disabled={leaving}
-                    className={dangerLink}
-                  >
-                    {leaving ? "Working" : confirming === "leave" ? "Yes, leave" : "Yes, end it"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(null)}
-                    disabled={leaving}
-                    className={plainLink}
-                  >
-                    {confirming === "leave" ? "Stay" : "Keep it"}
-                  </button>
-                </>
-              )}
-            </div>
           </div>
         )}
       </div>

@@ -98,12 +98,93 @@ function AddGameTile() {
   );
 }
 
+type Sort = {
+  label: string;
+  // Sorts low to high. The direction button reverses it.
+  compare: (a: LibraryEntry, b: LibraryEntry) => number;
+  // Games without the sorted value go last in both directions.
+  missing: (entry: LibraryEntry) => boolean;
+  // What each direction means, and the direction a sort starts in.
+  ascending: string;
+  descending: string;
+  startsDescending: boolean;
+};
+
+const SORTS = {
+  added: {
+    label: "Date added",
+    compare: (a, b) => a.addedAt.localeCompare(b.addedAt),
+    missing: () => false,
+    ascending: "Oldest first",
+    descending: "Newest first",
+    startsDescending: true,
+  },
+  title: {
+    label: "Title",
+    compare: () => 0,
+    missing: () => false,
+    ascending: "A to Z",
+    descending: "Z to A",
+    startsDescending: false,
+  },
+  hours: {
+    label: "Hours to finish",
+    compare: (a, b) => (a.game.timeToBeatHours ?? 0) - (b.game.timeToBeatHours ?? 0),
+    missing: (entry) => entry.game.timeToBeatHours === null,
+    ascending: "Shortest first",
+    descending: "Longest first",
+    startsDescending: false,
+  },
+  year: {
+    label: "Release year",
+    compare: (a, b) => (a.game.releaseDate ?? "").localeCompare(b.game.releaseDate ?? ""),
+    missing: (entry) => entry.game.releaseDate === null,
+    ascending: "Oldest first",
+    descending: "Newest first",
+    startsDescending: true,
+  },
+} satisfies Record<string, Sort>;
+
+type SortKey = keyof typeof SORTS;
+
+function sortEntries(entries: LibraryEntry[], key: SortKey, descending: boolean): LibraryEntry[] {
+  const sort: Sort = SORTS[key];
+  const direction = descending ? -1 : 1;
+
+  return [...entries].sort(
+    (a, b) =>
+      Number(sort.missing(a)) - Number(sort.missing(b)) ||
+      direction * sort.compare(a, b) ||
+      // Ties, and the title sort itself, fall back to the title.
+      (key === "title" ? direction : 1) * a.game.title.localeCompare(b.game.title),
+  );
+}
+
+// Under a cover, the value the library is sorted by replaces the genre, so the order makes sense.
+function sortNote(entry: LibraryEntry, key: SortKey): string | null {
+  if (key === "hours") {
+    const hours = entry.game.timeToBeatHours;
+    return hours === null ? "Length unknown" : `About ${hours} ${hours === 1 ? "hr" : "hrs"}`;
+  }
+  if (key === "year") return entry.game.releaseDate?.slice(0, 4) ?? "Year unknown";
+
+  return null;
+}
+
 export function LibraryView() {
   const api = useApi();
   const [state, setState] = useState<State>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const [genre, setGenre] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>("added");
+  const [descending, setDescending] = useState(true);
+  const orderLabel = descending ? SORTS[sort].descending : SORTS[sort].ascending;
+
+  function chooseSort(key: SortKey) {
+    setSort(key);
+    setDescending(SORTS[key].startsDescending);
+  }
   // The server render cannot read storage, so it always starts on the grid.
   const layout = useSyncExternalStore(subscribeToLayout, readLayout, () => "grid" as Layout);
 
@@ -152,6 +233,7 @@ export function LibraryView() {
       (!genre || entry.game.genres.some((name) => shortGenre(name) === genre)) &&
       (!term || entry.game.title.toLowerCase().includes(term)),
   );
+  const sorted = sortEntries(visible, sort, descending);
   const count = entries.length;
   const filtered = genre !== null || term !== "";
 
@@ -202,6 +284,40 @@ export function LibraryView() {
               maxLength={100}
               className="min-h-11 w-full max-w-sm min-w-0 bg-surface px-3 text-forest pixel-frame placeholder:text-muted/70"
             />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-3">
+              <span className="pixel-label text-muted">Sort by</span>
+              <select
+                value={sort}
+                onChange={(event) => chooseSort(event.target.value as SortKey)}
+                className="pixel-select min-h-11 cursor-pointer bg-surface pl-3 font-semibold text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
+              >
+                {(Object.keys(SORTS) as SortKey[]).map((key) => (
+                  <option key={key} value={key}>
+                    {SORTS[key].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => setDescending((current) => !current)}
+              aria-label={`Order: ${orderLabel}. Reverse the order.`}
+              title={orderLabel}
+              className="inline-flex size-11 cursor-pointer items-center justify-center bg-surface text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
+            >
+              <svg
+                viewBox="0 0 7 8"
+                className={`h-4 w-3.5 fill-current ${descending ? "" : "rotate-180"}`}
+                shapeRendering="crispEdges"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M3 0h1v4H3zM0 4h7v1H0zM1 5h5v1H1zM2 6h3v1H2zM3 7h1v1H3z" />
+              </svg>
+            </button>
           </div>
 
           <div role="group" aria-label="Library layout" className="flex gap-2">
@@ -311,7 +427,7 @@ export function LibraryView() {
 
         {visible.length > 0 && layout === "list" && (
           <ul className="space-y-4 px-1">
-            {visible.map((entry) => (
+            {sorted.map((entry) => (
               <li key={entry.id}>
                 <Link
                   href={`/library/${entry.id}`}
@@ -350,7 +466,7 @@ export function LibraryView() {
             {/* First in the grid, so it is reachable without scrolling past every game. */}
             {showAddTile && <AddGameTile />}
 
-            {visible.map((entry) => (
+            {sorted.map((entry) => (
               <li key={entry.id}>
                 <Link
                   href={`/library/${entry.id}`}
@@ -370,8 +486,13 @@ export function LibraryView() {
                     )}
                   </span>
                   {layout === "compact" ? (
-                    <span className="line-clamp-2 text-sm font-bold leading-snug text-forest">
-                      {entry.game.title}
+                    <span>
+                      <span className="line-clamp-2 text-sm font-bold leading-snug text-forest">
+                        {entry.game.title}
+                      </span>
+                      {sortNote(entry, sort) && (
+                        <span className="block text-xs text-muted">{sortNote(entry, sort)}</span>
+                      )}
                     </span>
                   ) : (
                     <span>
@@ -379,7 +500,7 @@ export function LibraryView() {
                         {entry.game.title}
                       </span>
                       <span className="block text-sm text-muted">
-                        {genreLine(entry.game.genres)}
+                        {sortNote(entry, sort) ?? genreLine(entry.game.genres)}
                       </span>
                     </span>
                   )}
