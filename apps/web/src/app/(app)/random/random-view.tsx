@@ -21,6 +21,8 @@ const STEP = TILE + GAP;
 // How many covers pass before the pick, and how many trail after it so the row never runs out.
 const LEAD = 26;
 const TRAIL = 6;
+// The cover under the marker before a spin. Far enough in that covers fill the row to its left.
+const START = 4;
 const SPIN_MS = 3400;
 
 function sample(entries: LibraryEntry[]): LibraryEntry {
@@ -77,12 +79,11 @@ export function RandomView() {
   const api = useApi();
   const [state, setState] = useState<State>({ status: "loading" });
   const [reel, setReel] = useState<LibraryEntry[]>([]);
-  // How far the reel has slid, in pixels, and whether that slide is animated.
-  const [offset, setOffset] = useState(0);
+  // Which cover sits under the marker, and whether the slide to it is animated.
+  const [position, setPosition] = useState(START);
   const [animate, setAnimate] = useState(false);
   const [spinning, setSpinning] = useState(false);
   const [picked, setPicked] = useState<LibraryEntry | null>(null);
-  const windowRef = useRef<HTMLDivElement>(null);
   // The next spin, dealt ahead of time so its covers are downloaded before they are needed.
   const upcoming = useRef<{ reel: LibraryEntry[]; winner: LibraryEntry } | null>(null);
 
@@ -109,12 +110,6 @@ export function RandomView() {
   const entries = useMemo(() => (state.status === "ready" ? state.entries : []), [state]);
   const enough = entries.length >= MIN_RANDOM_GAMES;
 
-  // Where the reel must sit for the cover at `index` to be centred in the window.
-  function centred(index: number): number {
-    const width = windowRef.current?.clientWidth ?? 0;
-    return index * STEP + TILE / 2 - width / 2;
-  }
-
   // Decides the next spin as soon as the page is ready, and again after each result, then
   // fetches every cover on that reel. Covers used to arrive mid-spin and show as blank cards.
   useEffect(() => {
@@ -136,7 +131,7 @@ export function RandomView() {
     // Players who have asked for less motion get the result with no spin.
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setAnimate(false);
-      setOffset(centred(LEAD));
+      setPosition(LEAD);
       setPicked(winner);
       return;
     }
@@ -144,11 +139,11 @@ export function RandomView() {
     // Snap back to the start, then slide to the pick on the next frame so the move is animated.
     setSpinning(true);
     setAnimate(false);
-    setOffset(centred(2));
+    setPosition(START);
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         setAnimate(true);
-        setOffset(centred(LEAD));
+        setPosition(LEAD);
       }),
     );
   }
@@ -209,7 +204,6 @@ export function RandomView() {
         {state.status === "ready" && enough && (
           <>
             <div
-              ref={windowRef}
               aria-hidden="true"
               className="relative mx-1 overflow-hidden bg-surface py-4 pixel-frame"
             >
@@ -218,7 +212,10 @@ export function RandomView() {
                 className="flex"
                 style={{
                   gap: GAP,
-                  transform: `translateX(${-offset}px)`,
+                  // The row starts at the middle of the window, then shifts back by the distance
+                  // to the middle of the cover under the marker.
+                  marginLeft: "50%",
+                  transform: `translateX(${-(position * STEP + TILE / 2)}px)`,
                   transition: animate
                     ? `transform ${SPIN_MS}ms cubic-bezier(0.12, 0.72, 0.18, 1)`
                     : "none",
