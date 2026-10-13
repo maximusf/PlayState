@@ -15,6 +15,7 @@ const OUTLINE_STRENGTH = 0.4;
 // on one another, all ending at the same leading point, so it is brightest at the front.
 const TAIL_STEPS = 6;
 const GLOW = 12;
+const LAP_MS = 3000;
 // Room around the frame for the glow, which would otherwise be cut off.
 const PAD = 16;
 const NOTCH = 4;
@@ -44,6 +45,24 @@ export function WinnerTrace({ notched = false }: { notched?: boolean }) {
 
     return () => observer.disconnect();
   }, []);
+
+  // Sets the strokes moving. This is done here and not in the stylesheet so the movement
+  // cannot be lost to a stale stylesheet, and so it restarts cleanly when the card resizes.
+  useEffect(() => {
+    if (!size || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const strokes = ref.current?.querySelectorAll<SVGPathElement>("path[data-from]") ?? [];
+    const running = Array.from(strokes, (stroke) => {
+      const from = Number(stroke.dataset.from);
+      // One lap moves a stroke the whole way round the outline, which is 100 units long.
+      return stroke.animate([{ strokeDashoffset: from }, { strokeDashoffset: from - 100 }], {
+        duration: LAP_MS,
+        iterations: Infinity,
+      });
+    });
+
+    return () => running.forEach((animation) => animation.cancel());
+  }, [size]);
 
   const reach = THICKNESS / 2 + PAD;
   const width = size?.width ?? 0;
@@ -81,8 +100,7 @@ export function WinnerTrace({ notched = false }: { notched?: boolean }) {
                 strokeOpacity={stepStrength}
                 strokeDasharray={`${part} ${period - part}`}
                 strokeDashoffset={from}
-                className="win-trace-stroke"
-                style={{ "--from": from, "--to": from - 100 } as React.CSSProperties}
+                data-from={from}
               />
             );
           })}

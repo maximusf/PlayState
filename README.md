@@ -205,7 +205,7 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | GET | `/api/parties/:code/version` | Members | A short value that changes when the party does. The party page polls it to stay current | 200, 401, 403, 404 |
 | POST | `/api/parties/:code/roll` | Host | Save the game the host's dice landed on, body `{ "igdbId": 113112 }`, so every member sees it. Rate limited | 200, 400, 401, 403, 404, 409, 429 |
 | DELETE | `/api/parties/:code/members/me` | Yes | Leave a party. When the host leaves, the longest-standing member becomes host, and a host who is alone ends the party | 204, 401, 404 |
-| PATCH | `/api/parties/:code` | Host | Rename a party, body `{ "name": "Saturday night" }` | 200, 400, 401, 403, 404 |
+| PATCH | `/api/parties/:code` | Host | Change a party's name, or whether player limits are ignored for everyone, body `{ "name": "Saturday night", "ignoreLimits": true }`. Either may be sent alone | 200, 400, 401, 403, 404 |
 | DELETE | `/api/parties/:code/members/:memberId` | Host | Remove a player, who can then no longer rejoin with the link | 204, 401, 403, 404, 409 |
 | DELETE | `/api/parties/:code` | Host | End a party for everyone | 204, 401, 403, 404 |
 | GET | `/api/recommendations/options` | Yes | How many library games each picker type can suggest | 200, 401 |

@@ -8,8 +8,8 @@ import {
   leave,
   list,
   remove,
-  rename,
   roll,
+  update,
   version,
 } from "../controllers/party.controller";
 import { requireUser } from "../middleware/auth.middleware";
@@ -41,7 +41,7 @@ const joinLimit = rateLimit({
 router.get("/", list);
 router.post("/", createLimit, create);
 router.get("/:code", detail);
-router.patch("/:code", rename);
+router.patch("/:code", update);
 router.delete("/:code", end);
 router.get("/:code/invite", invite);
 router.get("/:code/version", version);

@@ -58,6 +58,8 @@ model Party {
   // The game the host's latest dice roll landed on, shown to every member.
   rolledIgdbId Int?
   rolledAt     DateTime?
+  // Set by the host. When true, games too small for the group still count as playable.
+  ignoreLimits Boolean   @default(false)
 
   members PartyMember[]
 
