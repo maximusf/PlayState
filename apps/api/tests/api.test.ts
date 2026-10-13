@@ -28,6 +28,7 @@ const db = vi.hoisted(() => ({
     findMany: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     delete: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -128,13 +129,22 @@ describe("POST /api/webhooks/clerk", () => {
     // The verified event names user_b. The unverified body above says user_a.
     verifyWebhook.mockResolvedValue({ type: "user.deleted", data: { id: "user_b", deleted: true } });
     db.userGame.deleteMany.mockResolvedValue({ count: 12 });
+    // They host two parties: one with another player in it, one where they are alone.
+    db.party.findMany.mockResolvedValue([
+      { id: "party_1", hostId: "user_b", members: [{ userId: "user_b" }, { userId: "user_c" }] },
+      { id: "party_2", hostId: "user_b", members: [{ userId: "user_b" }] },
+    ]);
 
     const res = await send();
 
     expect(res.status).toBe(200);
     expect(db.userGame.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_b" } });
-    // The parties they host end, and they are taken out of everyone else's.
-    expect(db.party.deleteMany).toHaveBeenCalledWith({ where: { hostId: "user_b" } });
+    // A hosted party passes to the next player, or ends if nobody else is in it.
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { hostId: "user_c" },
+    });
+    expect(db.party.delete).toHaveBeenCalledWith({ where: { id: "party_2" } });
     expect(db.partyMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_b" } });
     // The signature is checked against the raw bytes, so the body must not be parsed first.
     expect(Buffer.isBuffer(verifyWebhook.mock.calls[0][0].body)).toBe(true);
@@ -868,13 +878,19 @@ describe("DELETE /api/library/:id", () => {
 
 describe("parties", () => {
   const CODE = "abcDEF123_-x";
-  const member = (userId: string, displayName: string) => ({ partyId: "party_1", userId, displayName });
+  const member = (userId: string, displayName: string) => ({
+    id: `member_${displayName.toLowerCase()}`,
+    partyId: "party_1",
+    userId,
+    displayName,
+  });
   const party = (...members: ReturnType<typeof member>[]) => ({
     id: "party_1",
     code: CODE,
     name: "Friday night",
     // user_a started every party in these tests.
     hostId: "user_a",
+    removedUserIds: [] as string[],
     createdAt: new Date(),
     members,
   });
@@ -937,18 +953,27 @@ describe("parties", () => {
     expect(res.body.data.isHost).toBe(true);
   });
 
-  it("stops a player from hosting more than three parties at once", async () => {
-    db.party.count.mockResolvedValue(3);
+  it("stops a player from being in more than three parties, hosted or joined", async () => {
+    // Already in three parties, whether they started them or joined them.
+    db.partyMember.count.mockResolvedValue(3);
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max")));
 
-    const res = await request(app)
+    const start = await request(app)
       .post("/api/parties")
-      .set("x-test-user", "user_a")
-      .send({ name: "One too many", displayName: "Max" });
+      .set("x-test-user", "user_b")
+      .send({ name: "One too many", displayName: "Sam" });
+    const join = await request(app)
+      .post(`/api/parties/${CODE}/members`)
+      .set("x-test-user", "user_b")
+      .send({ displayName: "Sam" });
 
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe("PARTY_HOST_LIMIT");
-    expect(db.party.count).toHaveBeenCalledWith({ where: { hostId: "user_a" } });
+    for (const res of [start, join]) {
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe("PARTY_LIMIT_REACHED");
+    }
+    expect(db.partyMember.count).toHaveBeenCalledWith({ where: { userId: "user_b" } });
     expect(db.party.create).not.toHaveBeenCalled();
+    expect(db.partyMember.upsert).not.toHaveBeenCalled();
   });
 
   it("rate limits party creation per player", async () => {
@@ -1015,6 +1040,33 @@ describe("parties", () => {
     // Forty-one characters is one over the party name limit. A name of only spaces is empty.
     expect((await start("x".repeat(41), "Max")).status).toBe(400);
     expect((await start("     ", "Max")).status).toBe(400);
+    expect(db.party.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts emoji and other scripts in names, and refuses half an emoji", async () => {
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({ id: "p", createdAt: new Date(), ...data }));
+    const start = (name: string, displayName: string) => {
+      resetRateLimits();
+      return request(app).post("/api/parties").set("x-test-user", "user_a").send({ name, displayName });
+    };
+
+    // A family emoji is several characters joined invisibly. It must survive untouched.
+    const name = "金曜の夜 🎮";
+    const displayName = "Zoë 👨‍👩‍👧";
+    const ok = await start(name, displayName);
+
+    expect(ok.status).toBe(201);
+    expect(db.party.create.mock.calls[0][0].data).toMatchObject({
+      name,
+      members: { create: { userId: "user_a", displayName } },
+    });
+
+    // The first half of an emoji with its second half cut off.
+    const broken = await start("Squad", "Max\ud83c");
+
+    expect(broken.status).toBe(400);
+    expect(broken.body.error.code).toBe("VALIDATION_ERROR");
     expect(db.party.create).toHaveBeenCalledTimes(1);
   });
 
@@ -1154,9 +1206,9 @@ describe("parties", () => {
       expect.objectContaining({ title: "Portal 2", missing: "Rio", maxPlayers: null }),
     ]);
     expect(res.body.data.members).toEqual([
-      { displayName: "Max", isYou: true, isHost: true },
-      { displayName: "Sam", isYou: false, isHost: false },
-      { displayName: "Rio", isYou: false, isHost: false },
+      { id: "member_max", displayName: "Max", isYou: true, isHost: true },
+      { id: "member_sam", displayName: "Sam", isYou: false, isHost: false },
+      { id: "member_rio", displayName: "Rio", isYou: false, isHost: false },
     ]);
     expect(res.body.data.isHost).toBe(true);
     // Members know each other by display name only.
@@ -1190,8 +1242,6 @@ describe("parties", () => {
 
   it("lets a member leave without ending the party", async () => {
     db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
-    db.partyMember.deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
-
     const left = await request(app)
       .delete(`/api/parties/${CODE}/members/me`)
       .set("x-test-user", "user_b");
@@ -1207,16 +1257,107 @@ describe("parties", () => {
     expect(db.party.delete).not.toHaveBeenCalled();
   });
 
-  it("does not let the host leave their own party", async () => {
-    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+  it("hands the party to the longest-standing player when the host leaves", async () => {
+    // Sam joined before Rio, so Sam is next in line.
+    db.party.findUnique.mockResolvedValue(
+      party(member("user_a", "Max"), member("user_b", "Sam"), member("user_c", "Rio")),
+    );
 
     const res = await request(app)
       .delete(`/api/parties/${CODE}/members/me`)
       .set("x-test-user", "user_a");
 
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe("PARTY_HOST_CANNOT_LEAVE");
+    expect(res.status).toBe(204);
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { hostId: "user_b" },
+    });
+    expect(db.partyMember.deleteMany).toHaveBeenCalledWith({
+      where: { partyId: "party_1", userId: "user_a" },
+    });
+    expect(db.party.delete).not.toHaveBeenCalled();
+  });
+
+  it("ends the party when a host who is alone leaves", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max")));
+
+    const res = await request(app)
+      .delete(`/api/parties/${CODE}/members/me`)
+      .set("x-test-user", "user_a");
+
+    expect(res.status).toBe(204);
+    expect(db.party.delete).toHaveBeenCalledWith({ where: { id: "party_1" } });
+    expect(db.party.update).not.toHaveBeenCalled();
+  });
+
+  it("lets only the host rename the party, with the same name rules", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+    const rename = (user: string, name: string) =>
+      request(app).patch(`/api/parties/${CODE}`).set("x-test-user", user).send({ name });
+
+    const byMember = await rename("user_b", "Hijacked");
+    const tooLong = await rename("user_a", "x".repeat(41));
+    const byHost = await rename("user_a", "  Saturday   night ");
+
+    expect(byMember.status).toBe(403);
+    expect(byMember.body.error.code).toBe("PARTY_NOT_HOST");
+    expect(tooLong.status).toBe(400);
+    expect(byHost.status).toBe(200);
+    expect(byHost.body.data).toEqual({ name: "Saturday night" });
+    expect(db.party.update).toHaveBeenCalledTimes(1);
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { name: "Saturday night" },
+    });
+  });
+
+  it("lets only the host remove a player, and never themselves", async () => {
+    db.party.findUnique.mockResolvedValue(
+      party(member("user_a", "Max"), member("user_b", "Sam"), member("user_c", "Rio")),
+    );
+    const remove = (user: string, memberId: string) =>
+      request(app).delete(`/api/parties/${CODE}/members/${memberId}`).set("x-test-user", user);
+
+    const byMember = await remove("user_b", "member_rio");
+    const themselves = await remove("user_a", "member_max");
+    const stranger = await remove("user_a", "member_nobody");
+
+    expect(byMember.status).toBe(403);
+    expect(byMember.body.error.code).toBe("PARTY_NOT_HOST");
+    expect(themselves.status).toBe(409);
+    expect(stranger.status).toBe(404);
+    expect(stranger.body.error.code).toBe("PARTY_MEMBER_NOT_FOUND");
     expect(db.partyMember.deleteMany).not.toHaveBeenCalled();
+
+    const byHost = await remove("user_a", "member_sam");
+
+    expect(byHost.status).toBe(204);
+    // The removal is recorded against the account, so the link no longer lets them back in.
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { removedUserIds: { push: "user_b" } },
+    });
+    expect(db.partyMember.deleteMany).toHaveBeenCalledWith({
+      where: { id: "member_sam", partyId: "party_1" },
+    });
+  });
+
+  it("stops a removed player from rejoining with the link", async () => {
+    db.party.findUnique.mockResolvedValue({
+      ...party(member("user_a", "Max")),
+      removedUserIds: ["user_b"],
+    });
+
+    const invite = await request(app).get(`/api/parties/${CODE}/invite`).set("x-test-user", "user_b");
+    const rejoin = await request(app)
+      .post(`/api/parties/${CODE}/members`)
+      .set("x-test-user", "user_b")
+      .send({ displayName: "Sam again" });
+
+    expect(invite.body.data).toMatchObject({ joined: false, removed: true });
+    expect(rejoin.status).toBe(403);
+    expect(rejoin.body.error.code).toBe("PARTY_REMOVED");
+    expect(db.partyMember.upsert).not.toHaveBeenCalled();
   });
 
   it("lets the host end the party for everyone, and nobody else", async () => {

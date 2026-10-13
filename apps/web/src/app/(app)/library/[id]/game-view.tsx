@@ -32,11 +32,11 @@ const SESSION_OPTIONS: { value: SessionLength | null; label: string }[] = [
   { value: null, label: "Not sure" },
 ];
 
+// No time zone is set, so the date is the one on the reader's own calendar.
 const dateFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
-  timeZone: "UTC",
 });
 
 function TagRow({ label, values }: { label: string; values: string[] }) {
