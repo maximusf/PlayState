@@ -283,6 +283,13 @@ export async function setSessionLength(
   return toLibraryEntry(await findOwnedEntry(userId, id));
 }
 
+// Removes everything stored for a user. Called when their account is deleted.
+export async function deleteLibrary(userId: string): Promise<number> {
+  const { count } = await prisma.userGame.deleteMany({ where: { userId } });
+
+  return count;
+}
+
 export async function removeGameFromLibrary(userId: string, id: string): Promise<void> {
   // Scoping the delete to userId means another user's entry is never matched.
   const { count } = await prisma.userGame.deleteMany({

@@ -153,6 +153,7 @@ Real values never belong in Git. Each app reads its own file.
 | `FRONTEND_URL` | Origin allowed by CORS. Comma-separated for more than one |
 | `CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
 | `CLERK_SECRET_KEY` | Clerk secret key |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | Signing secret of the Clerk webhook that reports deleted accounts |
 | `DATABASE_URL` | Supabase pooled connection (port 6543), used by the running API |
 | `DIRECT_URL` | Supabase session connection (port 5432), used by Prisma migrations |
 | `TWITCH_CLIENT_ID` | Twitch application client ID |
@@ -182,6 +183,8 @@ Base path: `/api`. Successful responses use `{ "data": ... }`. Errors use `{ "er
 | Method | Path | Auth | Description | Statuses |
 |---|---|---|---|---|
 | GET | `/api/health` | No | Liveness check | 200 |
+| POST | `/api/webhooks/clerk` | Clerk signature | Deletes a user's library when Clerk reports their account was deleted | 200, 400 |
+| GET | `/api/stats` | No | How many players have a library, shown on the home page | 200 |
 | GET | `/api/catalog/search?q=` | No | Search IGDB by title (2 to 100 characters) | 200, 400, 502 |
 | GET | `/api/catalog/games/:igdbId` | No | Details for one game | 200, 400, 404, 502 |
 | GET | `/api/library` | Yes | The signed-in user's games | 200, 401 |
@@ -210,7 +213,7 @@ Recommendation request:
 - `gameMode`: `SINGLE_PLAYER`, `MULTIPLAYER`, `EITHER`
 - `exclude`: optional list of library entry IDs to leave out. The picker sends the games it has already shown, so "Pick again" returns different ones.
 
-Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `INTERNAL_ERROR`.
+Error codes: `VALIDATION_ERROR`, `UNAUTHORIZED`, `NOT_FOUND`, `GAME_NOT_FOUND`, `GAME_ALREADY_ADDED`, `LIBRARY_ITEM_NOT_FOUND`, `EMPTY_LIBRARY`, `IGDB_UNAVAILABLE`, `STEAM_UNAVAILABLE`, `STEAM_PROFILE_NOT_FOUND`, `STEAM_LIBRARY_HIDDEN`, `WEBHOOK_INVALID`, `INTERNAL_ERROR`.
 
 Steam import uses Steam only to learn which games a profile owns. All game data still comes from IGDB, so an imported game and a game added by hand are the same record and cannot appear twice. Steam shares a library only when the profile's Game details privacy setting is Public.
 

@@ -8,12 +8,17 @@ vi.mock("@clerk/express", () => ({
   getAuth: (req: Request) => ({ userId: req.headers["x-test-user"] ?? null }),
 }));
 
+// Stand-in for Clerk's signature check: each test decides what a webhook verifies as.
+const verifyWebhook = vi.hoisted(() => vi.fn());
+vi.mock("@clerk/express/webhooks", () => ({ verifyWebhook }));
+
 const db = vi.hoisted(() => ({
   userGame: {
     findMany: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn(),
     createMany: vi.fn(),
+    groupBy: vi.fn(),
     updateMany: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -76,6 +81,67 @@ describe("GET /api/health", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ok" });
+  });
+});
+
+describe("GET /api/stats", () => {
+  it("counts players without authentication and without exposing user IDs", async () => {
+    db.userGame.groupBy.mockResolvedValue([{ userId: "user_a" }, { userId: "user_b" }]);
+
+    const res = await request(app).get("/api/stats");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: { players: 2 } });
+    expect(db.userGame.groupBy).toHaveBeenCalledWith({ by: ["userId"] });
+  });
+});
+
+describe("POST /api/webhooks/clerk", () => {
+  const send = () =>
+    request(app)
+      .post("/api/webhooks/clerk")
+      .set("Content-Type", "application/json")
+      .send(JSON.stringify({ type: "user.deleted", data: { id: "user_a" } }));
+
+  it("rejects a request whose signature does not verify, and deletes nothing", async () => {
+    verifyWebhook.mockRejectedValue(new Error("No matching signature found"));
+
+    const res = await send();
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("WEBHOOK_INVALID");
+    expect(db.userGame.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("deletes the library of a deleted account, using the verified user ID", async () => {
+    // The verified event names user_b. The unverified body above says user_a.
+    verifyWebhook.mockResolvedValue({ type: "user.deleted", data: { id: "user_b", deleted: true } });
+    db.userGame.deleteMany.mockResolvedValue({ count: 12 });
+
+    const res = await send();
+
+    expect(res.status).toBe(200);
+    expect(db.userGame.deleteMany).toHaveBeenCalledWith({ where: { userId: "user_b" } });
+    // The signature is checked against the raw bytes, so the body must not be parsed first.
+    expect(Buffer.isBuffer(verifyWebhook.mock.calls[0][0].body)).toBe(true);
+  });
+
+  it("acknowledges other events without touching any data", async () => {
+    verifyWebhook.mockResolvedValue({ type: "user.created", data: { id: "user_c" } });
+
+    const res = await send();
+
+    expect(res.status).toBe(200);
+    expect(db.userGame.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when the delete fails, so Clerk retries", async () => {
+    verifyWebhook.mockResolvedValue({ type: "user.deleted", data: { id: "user_b" } });
+    db.userGame.deleteMany.mockRejectedValue(new Error("database unavailable"));
+
+    const res = await send();
+
+    expect(res.status).toBe(500);
   });
 });
 

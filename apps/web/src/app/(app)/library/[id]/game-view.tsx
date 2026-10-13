@@ -11,6 +11,7 @@ import {
   type SessionLength,
 } from "@/lib/api";
 import { shortGenre } from "@/lib/genres";
+import { gameModeBadges, IconBadge, platformBadges, type Badge } from "@/components/pixel-icons";
 import { EmptyState, GameCover, Notice, PixelLoader } from "@/components/ui";
 
 type State =
@@ -30,20 +31,7 @@ const SESSION_OPTIONS: { value: SessionLength | null; label: string }[] = [
   { value: null, label: "Not sure" },
 ];
 
-// IGDB's names for the computer platforms, and the short forms shown as badges.
-const COMPUTER_PLATFORMS: [igdbName: string, label: string][] = [
-  ["PC (Microsoft Windows)", "Windows"],
-  ["Mac", "Mac"],
-  ["Linux", "Linux"],
-];
-
-function computerPlatforms(platforms: string[]): string[] {
-  return COMPUTER_PLATFORMS.filter(([igdbName]) => platforms.includes(igdbName)).map(
-    ([, label]) => label,
-  );
-}
-
-const dateFormat =new Intl.DateTimeFormat("en-US", {
+const dateFormat = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
@@ -62,6 +50,28 @@ function TagRow({ label, values }: { label: string; values: string[] }) {
             {value}
           </span>
         ))}
+      </dd>
+    </>
+  );
+}
+
+// Like TagRow, but each value is an icon that shows its name on hover.
+function BadgeRow({ label, badges }: { label: string; badges: Badge[] }) {
+  if (badges.length === 0) return null;
+
+  return (
+    <>
+      <dt className="pixel-label self-center text-muted">{label}</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        {badges.map((badge) =>
+          badge.icon ? (
+            <IconBadge key={badge.label} icon={badge.icon} label={badge.label} />
+          ) : (
+            <span key={badge.label} className={tag}>
+              {badge.label}
+            </span>
+          ),
+        )}
       </dd>
     </>
   );
@@ -211,8 +221,8 @@ export function GameView({ id }: { id: string }) {
               <dl className="mt-7 grid grid-cols-1 gap-x-5 gap-y-3 border-y-4 border-dotted border-fern py-6 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-y-4">
                 <TagRow label="Genres" values={state.entry.game.genres.map(shortGenre)} />
                 <TagRow label="Themes" values={state.entry.game.themes} />
-                <TagRow label="Play" values={state.entry.game.gameModes} />
-                <TagRow label="Runs on" values={computerPlatforms(state.entry.platforms)} />
+                <BadgeRow label="Play" badges={gameModeBadges(state.entry.game.gameModes)} />
+                <BadgeRow label="Runs on" badges={platformBadges(state.entry.platforms)} />
               </dl>
 
               <section className="mt-7">
