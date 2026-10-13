@@ -21,7 +21,18 @@ const SECTIONS: { title: string; body: React.ReactNode }[] = [
     body: (
       <>
         PlayState stores the games you add and the session length you tag them with, linked to your
-        account ID. Only you can see your library. You can remove any game at any time.
+        account ID. Your library is private unless you join a party. You can remove any game at any time.
+      </>
+    ),
+  },
+  {
+    title: "Parties",
+    body: (
+      <>
+        When you join a party, its other members see the name you chose and the multiplayer games
+        you all have in common, plus the games only one member is missing. They never see the rest
+        of your library, your email, or your account ID. Leaving a party removes you from it. A
+        party is deleted when its host ends it, and otherwise one day after it was started.
       </>
     ),
   },

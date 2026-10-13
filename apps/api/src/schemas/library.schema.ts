@@ -41,5 +41,8 @@ export const ImportGamesSchema = z.object({
 });
 
 export const LibraryItemParamSchema = z.object({
-  id: z.string().min(1, "Library item ID is required."),
+  id: z
+    .string()
+    .min(1, "Library item ID is required.")
+    .max(64, "That library item ID is not valid."),
 });

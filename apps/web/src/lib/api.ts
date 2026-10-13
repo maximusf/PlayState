@@ -60,6 +60,35 @@ export type SteamImportPreview = {
 
 export type ImportResult = { added: number; skipped: number };
 
+export type PartySummary = {
+  code: string;
+  name: string;
+  memberCount: number;
+  expiresAt: string;
+  // Whether the viewer started this party, and so can end it.
+  isHost: boolean;
+};
+
+export type PartyInvite = PartySummary & { joined: boolean };
+
+type PartyGame = {
+  igdbId: number;
+  title: string;
+  coverUrl: string | null;
+  genres: string[];
+  gameModes: string[];
+  // The most players the game supports. Null when IGDB has no figure.
+  maxPlayers: number | null;
+};
+
+export type PartyDetail = PartySummary & {
+  members: { displayName: string; isYou: boolean; isHost: boolean }[];
+  // libraryEntryId points at the viewer's own copy of the game.
+  shared: (PartyGame & { libraryEntryId: string | null })[];
+  // missing is the display name of the one member who does not own the game.
+  almost: (PartyGame & { missing: string })[];
+};
+
 export type Recommendation = {
   id: string;
   igdbId: number;

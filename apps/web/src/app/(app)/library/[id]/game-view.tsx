@@ -12,7 +12,8 @@ import {
 } from "@/lib/api";
 import { shortGenre } from "@/lib/genres";
 import { gameModeBadges, IconBadge, platformBadges, type Badge } from "@/components/pixel-icons";
-import { EmptyState, GameCover, Notice, PixelLoader } from "@/components/ui";
+import { GameDetailSkeleton } from "@/components/skeletons";
+import { EmptyState, GameCover, Notice } from "@/components/ui";
 
 type State =
   | { status: "loading" }
@@ -156,7 +157,7 @@ export function GameView({ id }: { id: string }) {
       </Link>
 
       <div className="mt-5">
-        {state.status === "loading" && <PixelLoader label="Loading game" />}
+        {state.status === "loading" && <GameDetailSkeleton label="Loading game" />}
 
         {state.status === "error" && (
           <div className="space-y-4">

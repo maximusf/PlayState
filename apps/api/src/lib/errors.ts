@@ -11,6 +11,14 @@ export type ErrorCode =
   | "STEAM_PROFILE_NOT_FOUND"
   | "STEAM_LIBRARY_HIDDEN"
   | "WEBHOOK_INVALID"
+  | "PARTY_NOT_FOUND"
+  | "PARTY_NOT_JOINED"
+  | "PARTY_FULL"
+  | "PARTY_LIMIT_REACHED"
+  | "PARTY_HOST_LIMIT"
+  | "PARTY_NOT_HOST"
+  | "PARTY_HOST_CANNOT_LEAVE"
+  | "RATE_LIMITED"
   | "INTERNAL_ERROR";
 
 // An error the API expects and knows how to describe to a client.

@@ -45,6 +45,38 @@ model UserGame {
   @@index([userId])
 }
 
+// A group of players comparing libraries. Anyone with the invite link can join.
+model Party {
+  id   String @id @default(cuid())
+  // Unguessable code used in the invite link.
+  code String @unique
+  name String
+  // Clerk user ID of the player who started the party. Only they can end it.
+  hostId String
+
+  members PartyMember[]
+
+  createdAt DateTime @default(now())
+
+  @@index([hostId])
+}
+
+// One row per player in a party. userId is the Clerk user ID.
+model PartyMember {
+  id      String @id @default(cuid())
+  partyId String
+  userId  String
+  // The name this player chose to go by in this party.
+  displayName String
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  @@unique([partyId, userId])
+  @@index([userId])
+}
+
 enum SessionLength {
   SHORT
   MEDIUM

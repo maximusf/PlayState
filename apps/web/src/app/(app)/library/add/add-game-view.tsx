@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, errorMessage, useApi, type GameSearchResult } from "@/lib/api";
 import { genreLine } from "@/lib/genres";
+import { PixelIcon } from "@/components/pixel-icons";
+import { RowListSkeleton } from "@/components/skeletons";
 import { GameCover, Notice, PixelLoader } from "@/components/ui";
 
 type SearchState =
@@ -58,12 +60,24 @@ type SortKey = keyof typeof SORTS;
 // Per-row outcome of pressing Add.
 type AddState = "adding" | "added" | "duplicate" | { error: string };
 
+const MIN_SEARCH_LENGTH = 2;
+// A search returns up to 40 games. Eight fit on a laptop screen without much scrolling.
+const PAGE_SIZE = 8;
+// How long the player must stop typing before a search is sent. Short enough to feel live,
+// long enough that one word is one request and not one per letter.
+const TYPING_PAUSE_MS = 350;
+
 export function AddGameView() {
   const api = useApi();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [added, setAdded] = useState<Record<number, AddState>>({});
   const [sort, setSort] = useState<SortKey>("rating");
+  const [searching, setSearching] = useState(false);
+  const [page, setPage] = useState(1);
+  const resultsTop = useRef<HTMLDivElement>(null);
+  // The term most recently sent to the server.
+  const latestTerm = useRef<string | null>(null);
 
   const results = useMemo(() => {
     if (search.status !== "results") return [];
@@ -72,25 +86,82 @@ export function AddGameView() {
     return compare ? [...search.games].sort(compare) : search.games;
   }, [search, sort]);
 
-  async function onSubmit(event: React.SubmitEvent<HTMLFormElement>) {
+  // Results are shown a page at a time, so the list never runs far down the screen.
+  const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const firstShown = (currentPage - 1) * PAGE_SIZE;
+  const pageResults = results.slice(firstShown, firstShown + PAGE_SIZE);
+
+  function goToPage(next: number) {
+    setPage(next);
+    // The next page starts at its top, not wherever the last one was scrolled to.
+    resultsTop.current?.scrollIntoView({ block: "start" });
+  }
+
+  const runSearch = useCallback(
+    async (term: string) => {
+      // The same term twice in a row, such as pressing Enter after a pause, searches once.
+      if (term === latestTerm.current) return;
+      latestTerm.current = term;
+
+      // Results already on screen stay there while the next ones load, so the list
+      // does not flash empty on every keystroke.
+      setSearching(true);
+      setSearch((current) => (current.status === "results" ? current : { status: "loading" }));
+
+      try {
+        const games = await api<GameSearchResult[]>(
+          `/api/catalog/search?q=${encodeURIComponent(term)}`,
+        );
+        // A slower, older search must not overwrite the results of a newer one.
+        if (latestTerm.current === term) {
+          setSearch({ status: "results", term, games });
+          setPage(1);
+        }
+      } catch (error) {
+        if (latestTerm.current === term) {
+          setSearch({ status: "error", message: errorMessage(error) });
+          // Lets the same term be tried again.
+          latestTerm.current = null;
+        }
+      } finally {
+        if (latestTerm.current === term || latestTerm.current === null) setSearching(false);
+      }
+    },
+    [api],
+  );
+
+  // Search as the player types, once they pause.
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < MIN_SEARCH_LENGTH) return;
+
+    const timer = setTimeout(() => runSearch(term), TYPING_PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [query, runSearch]);
+
+  function onQueryChange(value: string) {
+    setQuery(value);
+
+    // Too short to search: clear the old results so they do not sit under an unrelated query.
+    if (value.trim().length < MIN_SEARCH_LENGTH) {
+      latestTerm.current = null;
+      setSearching(false);
+      setSearch({ status: "idle" });
+    }
+  }
+
+  // Pressing Enter searches straight away, without waiting for the pause.
+  function onSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const term = query.trim();
 
-    if (term.length < 2) {
+    if (term.length < MIN_SEARCH_LENGTH) {
       setSearch({ status: "hint", message: "Type at least 2 characters to search." });
       return;
     }
 
-    setSearch({ status: "loading" });
-
-    try {
-      const games = await api<GameSearchResult[]>(
-        `/api/catalog/search?q=${encodeURIComponent(term)}`,
-      );
-      setSearch({ status: "results", term, games });
-    } catch (error) {
-      setSearch({ status: "error", message: errorMessage(error) });
-    }
+    runSearch(term);
   }
 
   async function add(game: GameSearchResult) {
@@ -122,24 +193,24 @@ export function AddGameView() {
         <label htmlFor="game-search" className="pixel-label text-muted">
           Search by title
         </label>
-        <div className="mt-3 flex gap-5">
+        {/* Results load as the player types. Pressing Enter searches without waiting. */}
+        <div className="relative mt-3">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-pine"
+          >
+            <PixelIcon name="search" className="size-5" />
+          </span>
           <input
             id="game-search"
             type="search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Hades"
             autoComplete="off"
             maxLength={100}
-            className="min-h-11 min-w-0 flex-1 bg-surface px-3 text-forest pixel-frame placeholder:text-muted/70"
+            className="min-h-11 w-full min-w-0 bg-surface pr-3 pl-11 text-forest pixel-frame placeholder:text-muted/70"
           />
-          <button
-            type="submit"
-            disabled={search.status === "loading"}
-            className="btn btn-primary mb-2"
-          >
-            Search
-          </button>
         </div>
       </form>
 
@@ -153,10 +224,12 @@ export function AddGameView() {
         </Link>
       </p>
 
-      <div className="mt-8" aria-live="polite">
+      <div ref={resultsTop} className="mt-8 scroll-mt-6" aria-live="polite">
         {search.status === "hint" && <Notice tone="info">{search.message}</Notice>}
 
-        {search.status === "loading" && <PixelLoader label="Searching" />}
+        {/* First search: placeholder rows. Later ones: a small note above the current results. */}
+        {search.status === "loading" && <RowListSkeleton label="Searching" count={5} />}
+        {searching && search.status === "results" && <PixelLoader label="Searching" />}
 
         {search.status === "error" && <Notice tone="error">{search.message}</Notice>}
 
@@ -169,12 +242,20 @@ export function AddGameView() {
 
         {search.status === "results" && search.games.length > 1 && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-muted">{search.games.length} games found</p>
+            <p className="text-muted">
+              {pageCount > 1
+                ? `Showing ${firstShown + 1} to ${firstShown + pageResults.length} of ${search.games.length} games`
+                : `${search.games.length} games found`}
+            </p>
             <label className="flex items-center gap-3">
               <span className="pixel-label text-muted">Sort by</span>
               <select
                 value={sort}
-                onChange={(event) => setSort(event.target.value as SortKey)}
+                onChange={(event) => {
+                  setSort(event.target.value as SortKey);
+                  // A new order starts from its first page.
+                  setPage(1);
+                }}
                 className="pixel-select min-h-11 cursor-pointer bg-surface pl-3 font-semibold text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
               >
                 {Object.entries(SORTS).map(([key, option]) => (
@@ -188,8 +269,13 @@ export function AddGameView() {
         )}
 
         {search.status === "results" && search.games.length > 0 && (
-          <ul className="space-y-5 px-1">
-            {results.map((game) => {
+          <ul
+            // Dimmed while a newer search is running, to show these are about to be replaced.
+            className={`space-y-5 px-1 transition-opacity duration-200 ${
+              searching ? "opacity-50" : ""
+            }`}
+          >
+            {pageResults.map((game) => {
               const state = added[game.igdbId];
               const done = state === "added" || state === "duplicate";
 
@@ -243,6 +329,33 @@ export function AddGameView() {
               );
             })}
           </ul>
+        )}
+
+        {search.status === "results" && pageCount > 1 && (
+          <nav
+            aria-label="Search result pages"
+            className="mt-8 flex items-center justify-between gap-4 px-1 pb-2"
+          >
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="btn btn-secondary"
+            >
+              Previous
+            </button>
+            <p className="text-center font-semibold text-forest">
+              Page {currentPage} of {pageCount}
+            </p>
+            <button
+              type="button"
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === pageCount}
+              className="btn btn-secondary"
+            >
+              Next
+            </button>
+          </nav>
         )}
       </div>
     </div>

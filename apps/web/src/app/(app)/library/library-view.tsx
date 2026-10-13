@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { errorMessage, useApi, type LibraryEntry } from "@/lib/api";
 import { genreLine, shortGenre } from "@/lib/genres";
 import { PixelIcon, type PixelIconName } from "@/components/pixel-icons";
-import { EmptyState, GameCover, Notice, PixelLoader } from "@/components/ui";
+import { CoverGridSkeleton, RowListSkeleton } from "@/components/skeletons";
+import { EmptyState, GameCover, Notice } from "@/components/ui";
 
 type State =
   | { status: "loading" }
@@ -78,6 +79,25 @@ function listDetails(entry: LibraryEntry): string {
     .join(" | ");
 }
 
+// With fewer games than this, the first Add a game tile is still in view at the end
+// of the grid, and a second one right beside it would look like a mistake.
+const TAIL_TILE_MIN_GAMES = 10;
+
+function AddGameTile() {
+  return (
+    <li>
+      <Link href="/library/add" className="group flex flex-col gap-3 outline-offset-8">
+        <span className="flex aspect-[3/4] items-center justify-center bg-surface ring-4 ring-fern group-hover:ring-emerald group-focus-visible:ring-emerald">
+          <span aria-hidden="true" className="font-pixel text-7xl leading-none text-pine">
+            +
+          </span>
+        </span>
+        <span className="block text-lg font-bold leading-snug text-forest">Add a game</span>
+      </Link>
+    </li>
+  );
+}
+
 export function LibraryView() {
   const api = useApi();
   const [state, setState] = useState<State>({ status: "loading" });
@@ -134,6 +154,9 @@ export function LibraryView() {
   );
   const count = entries.length;
   const filtered = genre !== null || term !== "";
+
+  // The tile belongs to the full, large-cover grid. Search results and filters hide it.
+  const showAddTile = !filtered && layout === "grid";
 
   function clearFilters() {
     setGenre(null);
@@ -241,7 +264,12 @@ export function LibraryView() {
       )}
 
       <div className="mt-8">
-        {state.status === "loading" && <PixelLoader label="Loading your library" />}
+        {state.status === "loading" &&
+          (layout === "list" ? (
+            <RowListSkeleton label="Loading your library" count={6} />
+          ) : (
+            <CoverGridSkeleton label="Loading your library" variant={layout} />
+          ))}
 
         {state.status === "error" && (
           <div className="space-y-4">
@@ -320,18 +348,7 @@ export function LibraryView() {
             }
           >
             {/* First in the grid, so it is reachable without scrolling past every game. */}
-            {!filtered && layout === "grid" && (
-              <li>
-                <Link href="/library/add" className="group flex flex-col gap-3 outline-offset-8">
-                  <span className="flex aspect-[3/4] items-center justify-center bg-surface ring-4 ring-fern group-hover:ring-emerald group-focus-visible:ring-emerald">
-                    <span aria-hidden="true" className="font-pixel text-7xl leading-none text-pine">
-                      +
-                    </span>
-                  </span>
-                  <span className="block text-lg font-bold leading-snug text-forest">Add a game</span>
-                </Link>
-              </li>
-            )}
+            {showAddTile && <AddGameTile />}
 
             {visible.map((entry) => (
               <li key={entry.id}>
@@ -369,6 +386,9 @@ export function LibraryView() {
                 </Link>
               </li>
             ))}
+
+            {/* And again at the end, for anyone who has scrolled through a long library. */}
+            {showAddTile && visible.length >= TAIL_TILE_MIN_GAMES && <AddGameTile />}
           </ul>
         )}
       </div>
