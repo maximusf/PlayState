@@ -222,6 +222,7 @@ async function queryGamesByIds(igdbIds: number[]): Promise<IgdbGame[]> {
 // Clears everything this service remembers between requests. Used by tests.
 export function resetTokenCache(): void {
   maxPlayersCache.clear();
+  discoveryCache.clear();
   cachedToken = null;
 }
 
@@ -392,4 +393,170 @@ export async function findGamesBySteamAppIds(appIds: number[]): Promise<Map<numb
   }
 
   return matches;
+}
+
+// What discovery asks IGDB for. Age ratings and keywords are only used to filter, never stored.
+const DISCOVERY_FIELDS = [
+  "name",
+  "cover.image_id",
+  "genres.name",
+  "themes.id",
+  "themes.name",
+  "game_modes.name",
+  "keywords.name",
+  "first_release_date",
+  "total_rating",
+  "total_rating_count",
+  "game_type",
+  "version_parent",
+  "external_games.external_game_source",
+  "age_ratings.rating_category",
+  "age_ratings.rating_content_descriptions.description",
+];
+
+type IgdbDiscoveryGame = Omit<IgdbGame, "themes"> & {
+  themes?: { id?: number; name?: string }[];
+  keywords?: IgdbNamed[];
+  external_games?: { external_game_source?: number }[];
+  age_ratings?: {
+    rating_category?: number;
+    rating_content_descriptions?: { description?: string }[];
+  }[];
+  similar_games?: IgdbDiscoveryGame[];
+};
+
+// A game that might be worth suggesting, before anything is excluded or ranked.
+export type DiscoverCandidate = {
+  igdbId: number;
+  title: string;
+  coverUrl: string | null;
+  genres: string[];
+  themes: string[];
+  themeIds: number[];
+  gameModes: string[];
+  keywords: string[];
+  releaseYear: number | null;
+  rating: number | null;
+  ratingCount: number;
+  onSteam: boolean;
+  // IGDB's age rating category IDs, with the content descriptions that came with them.
+  ageRatings: { category: number; descriptions: string[] }[];
+  // The library games IGDB lists this one as similar to.
+  similarToIgdbIds: number[];
+};
+
+export type DiscoveryPool = {
+  candidates: DiscoverCandidate[];
+  // Keywords of the seed games, one entry per use, so common ones repeat.
+  seedKeywords: string[];
+};
+
+// What IGDB says about a game changes slowly, and a page visit costs up to two requests
+// out of a limit every player shares, so the same question is answered from memory for a while.
+const DISCOVERY_TTL_MS = 6 * 60 * 60 * 1000;
+const DISCOVERY_CACHE_LIMIT = 200;
+const discoveryCache = new Map<string, { pool: DiscoveryPool; at: number }>();
+
+function toCandidate(game: IgdbDiscoveryGame, similarTo: number[]): DiscoverCandidate {
+  return {
+    igdbId: game.id,
+    title: game.name ?? "Untitled",
+    coverUrl: coverUrl(game),
+    genres: names(game.genres),
+    themes: names(game.themes),
+    themeIds: (game.themes ?? []).flatMap((theme) => (theme.id ? [theme.id] : [])),
+    gameModes: names(game.game_modes),
+    keywords: names(game.keywords),
+    releaseYear: releaseDate(game)?.getUTCFullYear() ?? null,
+    rating: game.total_rating === undefined ? null : Math.round(game.total_rating),
+    ratingCount: game.total_rating_count ?? 0,
+    onSteam: (game.external_games ?? []).some((link) => link.external_game_source === STEAM_SOURCE),
+    ageRatings: (game.age_ratings ?? []).flatMap((rating) =>
+      rating.rating_category
+        ? [
+            {
+              category: rating.rating_category,
+              descriptions: (rating.rating_content_descriptions ?? []).flatMap((item) =>
+                item.description ? [item.description] : [],
+              ),
+            },
+          ]
+        : [],
+    ),
+    similarToIgdbIds: similarTo,
+  };
+}
+
+// Similar games arrive as expanded entries, so they need the same playable check as a search.
+function isDiscoverable(game: IgdbDiscoveryGame): boolean {
+  return isPlayable(game) && !game.version_parent;
+}
+
+function quoted(values: string[]): string {
+  // Apicalypse strings are double-quoted, so escape quotes and backslashes.
+  return values
+    .map((value) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(",");
+}
+
+// Games that look like what a player already owns: IGDB's "similar games" of the seed games,
+// plus well rated games that share the player's favourite genres. Two requests at most.
+// Nothing is excluded here, so one answer can be reused whatever the caller filters out.
+export async function getDiscoveryPool(
+  seedIgdbIds: number[],
+  genres: string[],
+): Promise<DiscoveryPool> {
+  const seeds = batches(seedIgdbIds)[0] ?? [];
+  const key = `${[...seeds].sort((a, b) => a - b).join(",")}|${[...genres].sort().join(",")}`;
+  const cached = discoveryCache.get(key);
+
+  if (cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.pool;
+
+  const similarFields = DISCOVERY_FIELDS.map((field) => `similar_games.${field}`).join(",");
+  const seedRows =
+    seeds.length > 0
+      ? await queryIgdb<IgdbDiscoveryGame>(
+          "games",
+          `fields keywords.name,${similarFields}; where id = (${seeds.join(",")}); limit 50;`,
+        )
+      : [];
+
+  // Under the radar means well rated but not yet rated by crowds.
+  const genreRows =
+    genres.length > 0
+      ? await queryIgdb<IgdbDiscoveryGame>(
+          "games",
+          `fields ${DISCOVERY_FIELDS.join(",")}; where genres.name = (${quoted(genres)}) & ${PLAYABLE_GAMES} & total_rating >= 70 & total_rating_count >= 5 & total_rating_count <= 500; sort total_rating desc; limit 100;`,
+        )
+      : [];
+
+  const found = new Map<number, DiscoverCandidate>();
+  const seedKeywords: string[] = [];
+
+  for (const row of seedRows) {
+    seedKeywords.push(...names(row.keywords));
+
+    for (const similar of row.similar_games ?? []) {
+      if (!isDiscoverable(similar)) continue;
+
+      const existing = found.get(similar.id);
+      if (existing) existing.similarToIgdbIds.push(row.id);
+      else found.set(similar.id, toCandidate(similar, [row.id]));
+    }
+  }
+
+  for (const row of genreRows) {
+    if (!found.has(row.id)) found.set(row.id, toCandidate(row, []));
+  }
+
+  // Remembered only after every request succeeded, so a failure is retried next time.
+  const pool = { candidates: [...found.values()], seedKeywords };
+
+  if (discoveryCache.size >= DISCOVERY_CACHE_LIMIT) {
+    const oldest = discoveryCache.keys().next().value;
+    if (oldest !== undefined) discoveryCache.delete(oldest);
+  }
+  discoveryCache.set(key, { pool, at: Date.now() });
+
+  return pool;
 }

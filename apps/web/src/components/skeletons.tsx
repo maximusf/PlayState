@@ -152,6 +152,30 @@ export function PickCardsSkeleton({ label }: { label: string }) {
   );
 }
 
+// The discover page: a grid of cards with a cover, a title, a reason and two buttons.
+export function DiscoverSkeleton({ label }: { label: string }) {
+  return (
+    <Skeleton label={label}>
+      <div className="grid gap-6 px-1 sm:grid-cols-2 lg:grid-cols-3">
+        {times(6).map((index) => (
+          <div
+            key={index}
+            className="flex gap-4 bg-surface p-4 pixel-frame [--frame:var(--color-fern)]"
+          >
+            <span className={`block w-24 shrink-0 aspect-[3/4] ${bone}`} />
+            <span className="min-w-0 flex-1 space-y-3">
+              <Line className="h-5 w-4/5" />
+              <Line className="h-3 w-1/2" />
+              <Line className="h-4 w-full" />
+              <Line className="h-11 w-full" />
+            </span>
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  );
+}
+
 // The player count badge on the home page: an icon beside a big number and a label.
 export function PlayerCountSkeleton({ label }: { label: string }) {
   return (

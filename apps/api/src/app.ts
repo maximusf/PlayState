@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { clerkMiddleware } from "@clerk/express";
 import catalogRoutes from "./routes/catalog.routes";
+import discoverRoutes from "./routes/discover.routes";
 import libraryRoutes from "./routes/library.routes";
 import partyRoutes from "./routes/party.routes";
 import recommendationRoutes from "./routes/recommendation.routes";
@@ -36,6 +37,7 @@ app.get("/api/health", (_req, res) => {
 app.use(clerkMiddleware());
 
 app.use("/api/catalog", catalogRoutes);
+app.use("/api/discover", discoverRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/parties", partyRoutes);
 app.use("/api/recommendations", recommendationRoutes);
