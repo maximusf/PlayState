@@ -7,6 +7,7 @@ import {
   list,
   previewSteam,
   remove,
+  removeMany,
   updateSessionLength,
 } from "../controllers/library.controller";
 import { requireUser } from "../middleware/auth.middleware";
@@ -49,6 +50,13 @@ const importLimit = rateLimit({
   message: "You have imported 3 Steam libraries this hour. Try again later, or add games one at a time.",
 });
 
+// A bulk delete is one request for up to 200 rows, so it gets its own, tighter limit.
+const bulkDeleteLimit = rateLimit({
+  windowMs: TEN_MINUTES,
+  max: 20,
+  message: "You are deleting too quickly. Wait a few minutes and try again.",
+});
+
 router.get("/", list);
 // Listed before "/:id" so "count" is not read as a library item ID.
 router.get("/count", count);
@@ -56,6 +64,8 @@ router.get("/:id", detail);
 router.post("/", add);
 router.post("/import", importAttemptLimit, importLimit, importMany);
 router.post("/import/steam", previewAttemptLimit, previewLimit, previewSteam);
+// POST, not DELETE, because the list of IDs travels in the body.
+router.post("/delete", bulkDeleteLimit, removeMany);
 router.patch("/:id", updateSessionLength);
 router.delete("/:id", remove);
 

@@ -76,6 +76,7 @@ const hadesEntry = {
   gameId: "game_1",
   createdAt: new Date("2026-10-08"),
   sessionLength: null as string | null,
+  familyShared: false,
   game: hadesRow,
 };
 
@@ -542,6 +543,7 @@ describe("POST /api/library", () => {
     expect(db.userGame.create.mock.calls[0][0].data).toEqual({
       userId: "user_a",
       gameId: "game_1",
+      familyShared: false,
     });
   });
 
@@ -855,6 +857,91 @@ describe("POST /api/library/import/steam", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.message).toContain("too quickly");
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+  });
+});
+
+describe("POST /api/library with the family tag", () => {
+  it("saves the tag, and defaults to untagged", async () => {
+    mockIgdb(() => json([{ id: 113112, name: "Hades" }]));
+    db.game.upsert.mockResolvedValue(hadesRow);
+    db.userGame.create.mockResolvedValue({ ...hadesEntry, familyShared: true });
+
+    const tagged = await request(app)
+      .post("/api/library")
+      .set("x-test-user", "user_a")
+      .send({ igdbId: 113112, familyShared: true });
+
+    expect(tagged.status).toBe(201);
+    expect(tagged.body.data.familyShared).toBe(true);
+    expect(db.userGame.create.mock.calls[0][0].data).toEqual({
+      userId: "user_a",
+      gameId: "game_1",
+      familyShared: true,
+    });
+
+    await request(app).post("/api/library").set("x-test-user", "user_a").send({ igdbId: 113112 });
+
+    expect(db.userGame.create.mock.calls[1][0].data.familyShared).toBe(false);
+  });
+
+  it("rejects a tag that is not true or false", async () => {
+    const res = await request(app)
+      .post("/api/library")
+      .set("x-test-user", "user_a")
+      .send({ igdbId: 113112, familyShared: "yes" });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/library/delete", () => {
+  const deleteMany = (body: unknown, user = "user_a") =>
+    request(app)
+      .post("/api/library/delete")
+      .set("x-test-user", user)
+      .send(body as object);
+
+  it("requires authentication", async () => {
+    const res = await request(app).post("/api/library/delete").send({ ids: ["a"] });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects an invalid body with 400 and deletes nothing", async () => {
+    const tooMany = Array.from({ length: 201 }, (_, index) => `id_${index}`);
+
+    for (const body of [{}, { ids: [] }, { ids: "a" }, { ids: [1] }, { ids: [""] }, { ids: tooMany }]) {
+      const res = await deleteMany(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    }
+    expect(db.userGame.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("deletes only the signed-in user's entries, once each", async () => {
+    db.userGame.deleteMany.mockResolvedValue({ count: 2 });
+
+    const res = await deleteMany({ ids: ["entry_1", "entry_2", "entry_2"], userId: "user_b" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ deleted: 2 });
+    expect(db.userGame.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["entry_1", "entry_2"] }, userId: "user_a" },
+    });
+  });
+
+  it("is rate limited per user", async () => {
+    db.userGame.deleteMany.mockResolvedValue({ count: 1 });
+
+    for (let index = 0; index < 20; index++) {
+      expect((await deleteMany({ ids: ["entry_1"] })).status).toBe(200);
+    }
+    const blocked = await deleteMany({ ids: ["entry_1"] });
+
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    expect((await deleteMany({ ids: ["entry_1"] }, "user_b")).status).toBe(200);
   });
 });
 
