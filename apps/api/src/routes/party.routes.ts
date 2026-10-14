@@ -3,6 +3,8 @@ import {
   create,
   detail,
   end,
+  extend,
+  handOver,
   invite,
   join,
   leave,
@@ -45,6 +47,8 @@ router.patch("/:code", update);
 router.delete("/:code", end);
 router.get("/:code/invite", invite);
 router.get("/:code/version", version);
+router.post("/:code/host", handOver);
+router.post("/:code/extend", extend);
 router.post("/:code/roll", rollLimit, roll);
 router.post("/:code/members", joinLimit, join);
 // "me" is matched before a member ID, so a player leaving is never read as a removal.

@@ -8,8 +8,11 @@ import { hasAny, MULTIPLAYER_MODES } from "./preferences";
 const MAX_MEMBERS = 12;
 // How many parties one player can be in at once, counting the ones they host.
 const MAX_PARTIES_PER_USER = 3;
-// A party is for one evening of deciding what to play. After a day it is gone.
-const PARTY_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+// The host picks how long a party lasts. The default is one evening of deciding what to play.
+const DEFAULT_LIFETIME_HOURS = 24;
+// Extending, which can be done once, adds this long to when the party would otherwise end.
+const EXTENSION_MS = 24 * HOUR_MS;
 
 type PartyGame = {
   igdbId: number;
@@ -26,6 +29,8 @@ export type PartySummary = {
   name: string;
   memberCount: number;
   expiresAt: string;
+  // Whether the host has already used the one extension.
+  extended: boolean;
   // Whether the viewer started this party, and so can end it.
   isHost: boolean;
 };
@@ -48,6 +53,8 @@ export type PartyDetail = PartySummary & {
   // The host's latest dice roll, so every member sees the same result.
   rolledIgdbId: number | null;
   rolledAt: string | null;
+  // The server clock when this was sent, so every browser can start the dice together.
+  serverNow: string;
   // The host's setting: games too small for the group still count as playable.
   ignoreLimits: boolean;
   // Changes whenever the party does. The page checks it to know when to reload.
@@ -56,17 +63,18 @@ export type PartyDetail = PartySummary & {
 
 export type PartySettings = { name: string; ignoreLimits: boolean; version: string };
 
-export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
+// serverNow is the server clock when the answer was made, so browsers can line their dice up.
+export type PartyRoll = { rolledIgdbId: number; rolledAt: string; serverNow: string; version: string };
 
-function expiresAt(party: { createdAt: Date }): Date {
-  return new Date(party.createdAt.getTime() + PARTY_LIFETIME_MS);
+function times(party: { expiresAt: Date; extended: boolean }) {
+  return { expiresAt: party.expiresAt.toISOString(), extended: party.extended };
 }
 
 // Expired parties are removed whenever someone lists, starts or joins one, so no
 // scheduled job is needed. Deleting a party deletes its memberships with it.
 async function deleteExpiredParties(): Promise<void> {
   await prisma.party.deleteMany({
-    where: { createdAt: { lt: new Date(Date.now() - PARTY_LIFETIME_MS) } },
+    where: { expiresAt: { lte: new Date() } },
   });
 }
 
@@ -76,6 +84,7 @@ type VersionedParty = {
   rolledIgdbId: number | null;
   rolledAt: Date | null;
   ignoreLimits: boolean;
+  expiresAt: Date;
   members: { id: string; displayName: string }[];
 };
 
@@ -88,6 +97,7 @@ function versionOf(party: VersionedParty): string {
     party.rolledIgdbId,
     party.rolledAt?.getTime() ?? null,
     party.ignoreLimits,
+    party.expiresAt.getTime(),
     party.members.map((member) => [member.id, member.displayName]),
   ];
 
@@ -112,7 +122,7 @@ async function findParty(code: string) {
   });
 
   // An expired party that has not been cleaned up yet is treated as gone.
-  if (!party || expiresAt(party).getTime() <= Date.now()) throw notFound();
+  if (!party || party.expiresAt.getTime() <= Date.now()) throw notFound();
 
   return party;
 }
@@ -130,7 +140,7 @@ export async function listParties(userId: string): Promise<PartySummary[]> {
     code: party.code,
     name: party.name,
     memberCount: party._count.members,
-    expiresAt: expiresAt(party).toISOString(),
+    ...times(party),
     isHost: party.hostId === userId,
   }));
 }
@@ -139,6 +149,7 @@ export async function createParty(
   userId: string,
   name: string,
   displayName: string,
+  lifetimeHours: number = DEFAULT_LIFETIME_HOURS,
 ): Promise<PartySummary> {
   await deleteExpiredParties();
 
@@ -156,6 +167,7 @@ export async function createParty(
       code: randomBytes(9).toString("base64url"),
       name,
       hostId: userId,
+      expiresAt: new Date(Date.now() + lifetimeHours * HOUR_MS),
       members: { create: { userId, displayName } },
     },
   });
@@ -164,7 +176,7 @@ export async function createParty(
     code: party.code,
     name: party.name,
     memberCount: 1,
-    expiresAt: expiresAt(party).toISOString(),
+    ...times(party),
     isHost: true,
   };
 }
@@ -177,7 +189,7 @@ export async function getInvite(userId: string, code: string): Promise<PartyInvi
     code: party.code,
     name: party.name,
     memberCount: party.members.length,
-    expiresAt: expiresAt(party).toISOString(),
+    ...times(party),
     isHost: party.hostId === userId,
     joined: party.members.some((member) => member.userId === userId),
     removed: party.removedUserIds.includes(userId),
@@ -221,7 +233,7 @@ export async function joinParty(
     code: party.code,
     name: party.name,
     memberCount: party.members.length + (alreadyIn ? 0 : 1),
-    expiresAt: expiresAt(party).toISOString(),
+    ...times(party),
     isHost: party.hostId === userId,
   };
 }
@@ -296,7 +308,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     code: party.code,
     name: party.name,
     memberCount: party.members.length,
-    expiresAt: expiresAt(party).toISOString(),
+    ...times(party),
     isHost: party.hostId === userId,
     // User IDs stay on the server. Members know each other only by display name.
     members: party.members.map((member) => ({
@@ -310,6 +322,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     others: others.sort(byTitle),
     rolledIgdbId: party.rolledIgdbId,
     rolledAt: party.rolledAt?.toISOString() ?? null,
+    serverNow: new Date().toISOString(),
     ignoreLimits: party.ignoreLimits,
     version: versionOf(party),
   };
@@ -352,6 +365,7 @@ export async function recordRoll(userId: string, code: string, igdbId: number): 
   return {
     rolledIgdbId: igdbId,
     rolledAt: rolledAt.toISOString(),
+    serverNow: new Date().toISOString(),
     version: versionOf({ ...party, rolledIgdbId: igdbId, rolledAt }),
   };
 }
@@ -432,6 +446,50 @@ export async function removeMember(userId: string, code: string, memberId: strin
     data: { removedUserIds: { push: member.userId } },
   });
   await prisma.partyMember.deleteMany({ where: { id: member.id, partyId: party.id } });
+}
+
+// Passes the party to another current member, without the host having to leave.
+export async function transferHost(userId: string, code: string, memberId: string): Promise<void> {
+  const party = await findParty(code);
+  requireHost(party, userId, "hand it over");
+
+  // A removed player is no longer a member, so they cannot be found here.
+  const member = party.members.find((candidate) => candidate.id === memberId);
+
+  if (!member || party.removedUserIds.includes(member.userId)) {
+    throw new AppError(404, "PARTY_MEMBER_NOT_FOUND", "That player is not in this party.");
+  }
+
+  if (member.userId === party.hostId) {
+    throw new AppError(409, "PARTY_ALREADY_HOST", "You are already the host.");
+  }
+
+  await prisma.party.update({ where: { id: party.id }, data: { hostId: member.userId } });
+}
+
+// Adds a day to the party. This can be done once.
+export async function extendParty(userId: string, code: string): Promise<PartySummary> {
+  const party = await findParty(code);
+  requireHost(party, userId, "extend it");
+
+  const expiresAt = new Date(party.expiresAt.getTime() + EXTENSION_MS);
+  // The flag is part of the match, so two quick presses cannot add two days.
+  const { count } = await prisma.party.updateMany({
+    where: { id: party.id, extended: false },
+    data: { expiresAt, extended: true },
+  });
+
+  if (count === 0) {
+    throw new AppError(409, "PARTY_ALREADY_EXTENDED", "This party has already been extended once.");
+  }
+
+  return {
+    code: party.code,
+    name: party.name,
+    memberCount: party.members.length,
+    ...times({ expiresAt, extended: true }),
+    isHost: true,
+  };
 }
 
 // Ends a party for everyone. Only the player who started it may do this.

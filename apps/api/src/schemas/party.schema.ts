@@ -32,9 +32,18 @@ function nameField(label: string, max: number) {
 
 const displayName = nameField("Nickname", MAX_DISPLAY_NAME);
 
+// How long a party can last, in hours: 3 hours, 24 hours or 7 days.
+export const PARTY_LIFETIMES_HOURS = [3, 24, 168];
+
 export const CreatePartySchema = z.object({
   name: nameField("Party name", MAX_PARTY_NAME),
   displayName,
+  lifetimeHours: z
+    .number({ error: "Choose how long the party lasts." })
+    .refine((hours) => PARTY_LIFETIMES_HOURS.includes(hours), {
+      message: "A party lasts 3 hours, 24 hours or 7 days.",
+    })
+    .default(24),
 });
 
 export const JoinPartySchema = z.object({ displayName });
@@ -54,6 +63,12 @@ export const RollSchema = z.object({
     .number({ error: "igdbId must be a number." })
     .int("igdbId must be a whole number.")
     .positive("igdbId must be positive."),
+});
+
+export const TransferHostSchema = z.object({
+  memberId: z
+    .string({ error: "Choose a player to make host." })
+    .regex(/^[A-Za-z0-9_-]{1,64}$/, "That party member is not valid."),
 });
 
 export const PartyMemberParamSchema = z.object({

@@ -6,11 +6,14 @@ import {
   PartyCodeParamSchema,
   PartyMemberParamSchema,
   RollSchema,
+  TransferHostSchema,
   UpdatePartySchema,
 } from "../schemas/party.schema";
 import {
   createParty,
   endParty,
+  extendParty,
+  transferHost,
   getInvite,
   getParty,
   getPartyVersion,
@@ -27,8 +30,8 @@ export async function list(_req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const { name, displayName } = CreatePartySchema.parse(req.body);
-  const party = await createParty(getUserId(res), name, displayName);
+  const { name, displayName, lifetimeHours } = CreatePartySchema.parse(req.body);
+  const party = await createParty(getUserId(res), name, displayName, lifetimeHours);
 
   res.status(201).json({ data: party });
 }
@@ -78,6 +81,20 @@ export async function remove(req: Request, res: Response) {
   await removeMember(getUserId(res), code, memberId);
 
   res.status(204).end();
+}
+
+export async function handOver(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { memberId } = TransferHostSchema.parse(req.body);
+  await transferHost(getUserId(res), code, memberId);
+
+  res.status(204).end();
+}
+
+export async function extend(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+
+  res.status(200).json({ data: await extendParty(getUserId(res), code) });
 }
 
 export async function end(req: Request, res: Response) {

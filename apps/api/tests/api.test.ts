@@ -30,6 +30,7 @@ const db = vi.hoisted(() => ({
     count: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     delete: vi.fn(),
     deleteMany: vi.fn(),
   },
@@ -1024,6 +1025,8 @@ describe("parties", () => {
     rolledIgdbId: null as number | null,
     rolledAt: null as Date | null,
     ignoreLimits: false,
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    extended: false,
     createdAt: new Date(),
     members,
   });
@@ -1062,7 +1065,8 @@ describe("parties", () => {
     db.partyMember.count.mockResolvedValue(0);
     db.party.create.mockImplementation(async ({ data }) => ({
       id: "party_1",
-      createdAt: new Date("2026-10-13T12:00:00Z"),
+      createdAt: new Date(),
+      extended: false,
       ...data,
     }));
 
@@ -1075,9 +1079,11 @@ describe("parties", () => {
     expect(res.body.data).toMatchObject({
       name: "Friday night",
       memberCount: 1,
-      // A party lasts one day from when it was started.
-      expiresAt: "2026-10-14T12:00:00.000Z",
+      extended: false,
     });
+    // With no length chosen, a party lasts one day from when it was started.
+    const lasts = new Date(res.body.data.expiresAt).getTime() - Date.now();
+    expect(Math.abs(lasts - 24 * 60 * 60 * 1000)).toBeLessThan(5000);
     expect(res.body.data.code).toMatch(/^[A-Za-z0-9_-]{12}$/);
     expect(db.party.create.mock.calls[0][0].data).toMatchObject({
       hostId: "user_a",
@@ -1233,9 +1239,87 @@ describe("parties", () => {
     expect(res.body.error.code).toBe("PARTY_NOT_FOUND");
   });
 
-  it("treats a party older than a day as gone, and clears expired parties out", async () => {
-    const yesterday = new Date(Date.now() - 25 * 60 * 60 * 1000);
-    db.party.findUnique.mockResolvedValue({ ...party(member("user_a", "Max")), createdAt: yesterday });
+  it("starts a party for the length the host chose, and refuses any other", async () => {
+    db.party.count.mockResolvedValue(0);
+    db.partyMember.count.mockResolvedValue(0);
+    db.party.create.mockImplementation(async ({ data }) => ({
+      id: "p",
+      createdAt: new Date(),
+      extended: false,
+      ...data,
+    }));
+    const start = (lifetimeHours: number) =>
+      request(app)
+        .post("/api/parties")
+        .set("x-test-user", "user_a")
+        .send({ name: "Squad", displayName: "Max", lifetimeHours });
+
+    const short = await start(3);
+    const week = await start(168);
+    const odd = await start(5);
+
+    const lasts = (res: { body: { data: { expiresAt: string } } }) =>
+      new Date(res.body.data.expiresAt).getTime() - Date.now();
+    expect(Math.abs(lasts(short) - 3 * 60 * 60 * 1000)).toBeLessThan(5000);
+    expect(Math.abs(lasts(week) - 7 * 24 * 60 * 60 * 1000)).toBeLessThan(5000);
+    expect(odd.status).toBe(400);
+  });
+
+  it("lets only the host extend a party, and only once", async () => {
+    const base = party(member("user_a", "Max"), member("user_b", "Sam"));
+    db.party.findUnique.mockResolvedValue(base);
+    db.party.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    const notHost = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_b");
+    const first = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_a");
+    const second = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_a");
+
+    expect(notHost.status).toBe(403);
+    expect(first.status).toBe(200);
+    expect(first.body.data.extended).toBe(true);
+    expect(new Date(first.body.data.expiresAt).getTime()).toBe(
+      base.expiresAt.getTime() + 24 * 60 * 60 * 1000,
+    );
+    expect(db.party.updateMany.mock.calls[0][0].where).toEqual({ id: "party_1", extended: false });
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe("PARTY_ALREADY_EXTENDED");
+  });
+
+  it("lets the host hand the party to another member without leaving", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max"), member("user_b", "Sam")));
+
+    const handed = await request(app)
+      .post(`/api/parties/${CODE}/host`)
+      .set("x-test-user", "user_a")
+      .send({ memberId: "member_sam" });
+    const notHost = await request(app)
+      .post(`/api/parties/${CODE}/host`)
+      .set("x-test-user", "user_b")
+      .send({ memberId: "member_sam" });
+    const stranger = await request(app)
+      .post(`/api/parties/${CODE}/host`)
+      .set("x-test-user", "user_a")
+      .send({ memberId: "member_nobody" });
+    const self = await request(app)
+      .post(`/api/parties/${CODE}/host`)
+      .set("x-test-user", "user_a")
+      .send({ memberId: "member_max" });
+
+    expect(handed.status).toBe(204);
+    expect(db.party.update).toHaveBeenCalledTimes(1);
+    expect(db.party.update).toHaveBeenCalledWith({
+      where: { id: "party_1" },
+      data: { hostId: "user_b" },
+    });
+    expect(notHost.status).toBe(403);
+    expect(stranger.status).toBe(404);
+    expect(self.status).toBe(409);
+    expect(db.partyMember.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("treats an expired party as gone, and clears expired parties out", async () => {
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    db.party.findUnique.mockResolvedValue({ ...party(member("user_a", "Max")), expiresAt: hourAgo });
     db.party.findMany.mockResolvedValue([]);
 
     const expired = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_a");
@@ -1245,9 +1329,8 @@ describe("parties", () => {
     expect(expired.body.error.code).toBe("PARTY_NOT_FOUND");
     expect(db.userGame.findMany).not.toHaveBeenCalled();
 
-    const cutoff = db.party.deleteMany.mock.calls[0][0].where.createdAt.lt as Date;
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    expect(Math.abs(cutoff.getTime() - dayAgo)).toBeLessThan(5000);
+    const cutoff = db.party.deleteMany.mock.calls[0][0].where.expiresAt.lte as Date;
+    expect(Math.abs(cutoff.getTime() - Date.now())).toBeLessThan(5000);
   });
 
   it("joins a party as the signed-in user", async () => {
