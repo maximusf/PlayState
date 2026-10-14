@@ -9,8 +9,10 @@ import {
   join,
   leave,
   list,
+  nominate,
   remove,
   roll,
+  unnominate,
   update,
   version,
 } from "../controllers/party.controller";
@@ -34,6 +36,11 @@ const rollLimit = rateLimit({
   max: 120,
   message: "You are rolling too quickly. Wait a few minutes and try again.",
 });
+const nominateLimit = rateLimit({
+  windowMs: TEN_MINUTES,
+  max: 120,
+  message: "You are nominating too quickly. Wait a few minutes and try again.",
+});
 const joinLimit = rateLimit({
   windowMs: TEN_MINUTES,
   max: 30,
@@ -50,6 +57,8 @@ router.get("/:code/version", version);
 router.post("/:code/host", handOver);
 router.post("/:code/extend", extend);
 router.post("/:code/roll", rollLimit, roll);
+router.post("/:code/nominations", nominateLimit, nominate);
+router.delete("/:code/nominations/:igdbId", nominateLimit, unnominate);
 router.post("/:code/members", joinLimit, join);
 // "me" is matched before a member ID, so a player leaving is never read as a removal.
 router.delete("/:code/members/me", leave);

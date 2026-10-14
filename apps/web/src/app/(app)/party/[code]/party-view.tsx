@@ -9,12 +9,20 @@ import {
   useApi,
   type PartyDetail,
   type PartyInvite,
+  type PartyNominations,
   type PartyRoll,
   type PartySummary,
   type PartySettings,
 } from "@/lib/api";
 import { Dice3D, DICE_MS } from "@/components/dice-3d";
 import { KebabMenu } from "@/components/kebab-menu";
+import {
+  NominatedBadge,
+  NominateButton,
+  NominationStrip,
+  RollSourceNote,
+  useNominations,
+} from "@/components/party-nominate";
 import { PixelIcon } from "@/components/pixel-icons";
 import { PartyChat } from "@/components/party-chat";
 import { WinnerTrace } from "@/components/winner-trace";
@@ -109,14 +117,17 @@ type Throw = { igdbId: number; delayMs: number };
 function PartyGames({
   party,
   path,
+  colours,
   onChanged,
 }: {
   party: PartyDetail;
   path: string;
+  colours: Map<string, string>;
   // Called with whatever the server says changed, so the page shows it straight away.
-  onChanged: (changes: PartyRoll | PartySettings) => void;
+  onChanged: (changes: PartyRoll | PartySettings | PartyNominations) => void;
 }) {
   const api = useApi();
+  const nominations = useNominations({ party, path, onChanged });
   const alone = party.memberCount === 1;
   const [sending, setSending] = useState(false);
   const [rollError, setRollError] = useState<string | null>(null);
@@ -215,7 +226,8 @@ function PartyGames({
   // The host's browser chooses and the server checks and saves it. Every browser, the host's
   // included, then plays the dice when it sees the saved roll, and lands on that game.
   async function roll() {
-    const pool = playable.map((tile) => tile.igdbId);
+    // Two or more nominated games are the only ones the dice can land on, unless the host opts out.
+    const pool = nominations.pool(playable.map((tile) => tile.igdbId));
     // A fresh roll never repeats the last one when there is another choice.
     const fresh = pool.filter((igdbId) => igdbId !== saved);
     const from = fresh.length > 0 ? fresh : pool;
@@ -225,7 +237,13 @@ function PartyGames({
     setRollError(null);
 
     try {
-      onChanged(await api<PartyRoll>(`${path}/roll`, { method: "POST", body: { igdbId: target } }));
+      onChanged(
+        await api<PartyRoll>(`${path}/roll`, {
+          method: "POST",
+          body: { igdbId: target, fromAll: nominations.rollFromAll },
+        }),
+      );
+      nominations.setRollFromAll(false);
     } catch (error) {
       setRollError(`The roll was not saved. ${errorMessage(error)}`);
     } finally {
@@ -261,6 +279,7 @@ function PartyGames({
             </button>
           </span>
         )}
+        {playable.length > 1 && party.isHost && <RollSourceNote nominations={nominations} />}
         {playable.length > 1 && !party.isHost && (
           <p className="flex items-center gap-2 text-muted">
             <PixelIcon name="dice" className="size-6" />
@@ -309,9 +328,19 @@ function PartyGames({
         </div>
       )}
 
-      {rollError && (
+      {playable.length > 0 && !alone && (
+        <NominationStrip
+          nominations={nominations}
+          members={party.members}
+          games={playable}
+          colours={colours}
+          isHost={party.isHost}
+        />
+      )}
+
+      {(rollError ?? nominations.error) && (
         <div className="mt-4">
-          <Notice tone="error">{rollError}</Notice>
+          <Notice tone="error">{rollError ?? nominations.error}</Notice>
         </div>
       )}
 
@@ -406,6 +435,10 @@ function PartyGames({
                           }`
                     }`}
                   />
+                  <NominatedBadge
+                    nominators={party.nominations.filter((n) => n.igdbId === tile.igdbId)}
+                    colours={colours}
+                  />
                 </span>
                 <span>
                   <span
@@ -417,6 +450,14 @@ function PartyGames({
                   </span>
                   {tile.note && <span className="block text-xs text-muted">{tile.note}</span>}
                 </span>
+                {tile.playable && !alone && (
+                  <NominateButton
+                    igdbId={tile.igdbId}
+                    title={tile.title}
+                    nominations={nominations}
+                    disabled={throwing}
+                  />
+                )}
               </li>
             );
           })}
@@ -951,6 +992,7 @@ export function PartyView({ code }: { code: string }) {
             <PartyGames
               party={state.party}
               path={path}
+              colours={memberColours}
               onChanged={(changes) =>
                 setState((current) =>
                   current.status === "ready"

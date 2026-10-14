@@ -104,9 +104,13 @@ export type PartyDetail = PartySummary & {
   serverNow: string;
   // The host's setting: games too small for the group still count as playable.
   ignoreLimits: boolean;
+  // Games members put forward for the next roll. memberId matches an entry in members.
+  nominations: { igdbId: number; memberId: string }[];
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
+
+export type PartyNominations = { nominations: PartyDetail["nominations"]; version: string };
 
 // serverNow is the server clock when the answer was made, so browsers can line their dice up.
 export type PartyRoll = { rolledIgdbId: number; rolledAt: string; serverNow: string; version: string };
