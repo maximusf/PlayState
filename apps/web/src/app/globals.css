@@ -153,6 +153,16 @@
   }
 }
 
+/* A hat on a preview avatar rises one pixel step and settles. Stopped below for reduced motion. */
+.party-hat-bob {
+  animation: party-hat-bob 1.6s steps(1, end) infinite;
+}
+
+@keyframes party-hat-bob {
+  50% {
+    transform: translateY(-2px);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

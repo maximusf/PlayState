@@ -90,7 +90,7 @@ type PartyGame = {
 
 export type PartyDetail = PartySummary & {
   // id names a member within this party. It is not an account ID.
-  members: { id: string; displayName: string; isYou: boolean; isHost: boolean }[];
+  members: { id: string; displayName: string; hatId: string | null; isYou: boolean; isHost: boolean }[];
   // libraryEntryId points at the viewer's own copy of the game.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // missing is the display name of the one member who does not own the game.
@@ -106,6 +106,8 @@ export type PartyDetail = PartySummary & {
   ignoreLimits: boolean;
   // Games members put forward for the next roll. memberId matches an entry in members.
   nominations: { igdbId: number; memberId: string }[];
+  // The host's picture for the top of the party page. Null means none.
+  backdropId: string | null;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
