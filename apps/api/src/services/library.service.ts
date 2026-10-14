@@ -26,6 +26,8 @@ function toLibraryEntry(entry: UserGameWithGame) {
     addedAt: entry.createdAt.toISOString(),
     // The player's own tag for how long their sittings with this game are.
     sessionLength: entry.sessionLength as SessionLength | null,
+    // Added by hand as a game shared through Steam Family.
+    familyShared: entry.familyShared,
     game: {
       igdbId: entry.game.igdbId,
       title: entry.game.title,
@@ -97,7 +99,11 @@ export async function getLibraryEntry(userId: string, id: string): Promise<Libra
   };
 }
 
-export async function addGameToLibrary(userId: string, igdbId: number): Promise<LibraryEntry> {
+export async function addGameToLibrary(
+  userId: string,
+  igdbId: number,
+  familyShared = false,
+): Promise<LibraryEntry> {
   // Game data always comes from IGDB, never from the client.
   const details = await getGameDetails(igdbId);
 
@@ -126,7 +132,7 @@ export async function addGameToLibrary(userId: string, igdbId: number): Promise<
 
   try {
     const entry = await prisma.userGame.create({
-      data: { userId, gameId: game.id },
+      data: { userId, gameId: game.id, familyShared },
       include: withGame,
     });
 
@@ -290,6 +296,16 @@ export async function setSessionLength(
 // Removes everything stored for a user. Called when their account is deleted.
 export async function deleteLibrary(userId: string): Promise<number> {
   const { count } = await prisma.userGame.deleteMany({ where: { userId } });
+
+  return count;
+}
+
+// Removes several entries at once. IDs that are not this player's are ignored, so the
+// result says how many were really removed.
+export async function removeGamesFromLibrary(userId: string, ids: string[]): Promise<number> {
+  const { count } = await prisma.userGame.deleteMany({
+    where: { id: { in: [...new Set(ids)] }, userId },
+  });
 
   return count;
 }

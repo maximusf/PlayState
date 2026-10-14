@@ -3,6 +3,7 @@ import { getUserId } from "../middleware/auth.middleware";
 import { doNotCount } from "../middleware/rate-limit.middleware";
 import {
   AddLibraryGameSchema,
+  DeleteLibraryGamesSchema,
   ImportGamesSchema,
   LibraryItemParamSchema,
   SessionLengthSchema,
@@ -16,6 +17,7 @@ import {
   listLibrary,
   previewSteamImport,
   removeGameFromLibrary,
+  removeGamesFromLibrary,
   setSessionLength,
 } from "../services/library.service";
 
@@ -37,8 +39,8 @@ export async function detail(req: Request, res: Response) {
 }
 
 export async function add(req: Request, res: Response) {
-  const { igdbId } = AddLibraryGameSchema.parse(req.body);
-  const entry = await addGameToLibrary(getUserId(res), igdbId);
+  const { igdbId, familyShared } = AddLibraryGameSchema.parse(req.body);
+  const entry = await addGameToLibrary(getUserId(res), igdbId, familyShared);
 
   res.status(201).json({ data: entry });
 }
@@ -67,6 +69,13 @@ export async function updateSessionLength(req: Request, res: Response) {
   const entry = await setSessionLength(getUserId(res), id, sessionLength);
 
   res.status(200).json({ data: entry });
+}
+
+export async function removeMany(req: Request, res: Response) {
+  const { ids } = DeleteLibraryGamesSchema.parse(req.body);
+  const deleted = await removeGamesFromLibrary(getUserId(res), ids);
+
+  res.status(200).json({ data: { deleted } });
 }
 
 export async function remove(req: Request, res: Response) {

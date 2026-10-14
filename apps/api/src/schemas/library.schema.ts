@@ -14,6 +14,8 @@ export const AddLibraryGameSchema = z.object({
     .number({ error: "igdbId must be a number." })
     .int("igdbId must be a whole number.")
     .positive("igdbId must be positive."),
+  // Optional, so older clients that send only igdbId keep working.
+  familyShared: z.boolean({ error: "familyShared must be true or false." }).optional(),
 });
 
 export const SteamProfileSchema = z.object({
@@ -38,6 +40,22 @@ export const ImportGamesSchema = z.object({
     )
     .min(1, "Choose at least one game to import.")
     .max(MAX_IMPORT, `At most ${MAX_IMPORT} games can be imported at once.`),
+});
+
+// One selection in the library. Far below the import limit, as every ID is a row to delete.
+export const MAX_BULK_DELETE = 200;
+
+export const DeleteLibraryGamesSchema = z.object({
+  ids: z
+    .array(
+      z
+        .string({ error: "ids must be library item IDs." })
+        .min(1, "Library item ID is required.")
+        .max(64, "That library item ID is not valid."),
+      { error: "ids must be a list of library item IDs." },
+    )
+    .min(1, "Choose at least one game to delete.")
+    .max(MAX_BULK_DELETE, `At most ${MAX_BULK_DELETE} games can be deleted at once.`),
 });
 
 export const LibraryItemParamSchema = z.object({

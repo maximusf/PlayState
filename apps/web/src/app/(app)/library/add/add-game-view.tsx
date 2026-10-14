@@ -67,14 +67,16 @@ const PAGE_SIZE = 8;
 // long enough that one word is one request and not one per letter.
 const TYPING_PAUSE_MS = 350;
 
-export function AddGameView() {
+export function AddGameView({ initialQuery = "" }: { initialQuery?: string }) {
   const api = useApi();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [added, setAdded] = useState<Record<number, AddState>>({});
   const [sort, setSort] = useState<SortKey>("rating");
   const [searching, setSearching] = useState(false);
   const [page, setPage] = useState(1);
+  // Applies to every game added from this page until it is switched off.
+  const [familyShared, setFamilyShared] = useState(false);
   const resultsTop = useRef<HTMLDivElement>(null);
   // The term most recently sent to the server.
   const latestTerm = useRef<string | null>(null);
@@ -168,7 +170,7 @@ export function AddGameView() {
     setAdded((current) => ({ ...current, [game.igdbId]: "adding" }));
 
     try {
-      await api("/api/library", { method: "POST", body: { igdbId: game.igdbId } });
+      await api("/api/library", { method: "POST", body: { igdbId: game.igdbId, familyShared } });
       setAdded((current) => ({ ...current, [game.igdbId]: "added" }));
     } catch (error) {
       const outcome: AddState =
@@ -214,7 +216,22 @@ export function AddGameView() {
         </div>
       </form>
 
-      <p className="mt-5 px-1 text-muted">
+      <label className="mt-5 flex min-h-11 w-fit cursor-pointer items-center gap-3 px-1">
+        <input
+          type="checkbox"
+          checked={familyShared}
+          onChange={(event) => setFamilyShared(event.target.checked)}
+          className="size-5 shrink-0 cursor-pointer accent-emerald"
+        />
+        <span>
+          <span className="font-semibold text-forest">From Steam Family</span>
+          <span className="block text-sm text-muted">
+            Tag the games you add next as shared through Steam Family. They still count as yours.
+          </span>
+        </span>
+      </label>
+
+      <p className="mt-2 px-1 text-muted">
         Have a Steam library?{" "}
         <Link
           href="/library/import"
