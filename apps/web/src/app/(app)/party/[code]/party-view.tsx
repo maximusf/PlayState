@@ -16,6 +16,7 @@ import {
 import { Dice3D, DICE_MS } from "@/components/dice-3d";
 import { KebabMenu } from "@/components/kebab-menu";
 import { PixelIcon } from "@/components/pixel-icons";
+import { PartyChat } from "@/components/party-chat";
 import { WinnerTrace } from "@/components/winner-trace";
 import { PartySkeleton } from "@/components/skeletons";
 import { CountedInput, EmptyState, GameCover, Notice } from "@/components/ui";
@@ -958,6 +959,8 @@ export function PartyView({ code }: { code: string }) {
                 )
               }
             />
+
+            <PartyChat path={path} />
           </div>
         )}
       </div>
