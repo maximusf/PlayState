@@ -4,6 +4,7 @@ import { clerkMiddleware } from "@clerk/express";
 import catalogRoutes from "./routes/catalog.routes";
 import discoverRoutes from "./routes/discover.routes";
 import libraryRoutes from "./routes/library.routes";
+import partyPreviewRoutes from "./routes/party-preview.routes";
 import partyRoutes from "./routes/party.routes";
 import recommendationRoutes from "./routes/recommendation.routes";
 import statsRoutes from "./routes/stats.routes";
@@ -39,6 +40,8 @@ app.use(clerkMiddleware());
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/discover", discoverRoutes);
 app.use("/api/library", libraryRoutes);
+// Public, so it is mounted on its own path and not under the signed-in party routes.
+app.use("/api/public/parties", partyPreviewRoutes);
 app.use("/api/parties", partyRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/stats", statsRoutes);
