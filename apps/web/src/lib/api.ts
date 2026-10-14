@@ -65,6 +65,8 @@ export type PartySummary = {
   name: string;
   memberCount: number;
   expiresAt: string;
+  // Whether the host has already used the one extension.
+  extended: boolean;
   // Whether the viewer started this party, and so can end it.
   isHost: boolean;
 };
@@ -97,13 +99,16 @@ export type PartyDetail = PartySummary & {
   // The host's latest dice roll, the same for every member.
   rolledIgdbId: number | null;
   rolledAt: string | null;
+  // The server clock when this was sent, so every browser can start the dice together.
+  serverNow: string;
   // The host's setting: games too small for the group still count as playable.
   ignoreLimits: boolean;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
 
-export type PartyRoll = { rolledIgdbId: number; rolledAt: string; version: string };
+// serverNow is the server clock when the answer was made, so browsers can line their dice up.
+export type PartyRoll = { rolledIgdbId: number; rolledAt: string; serverNow: string; version: string };
 
 export type PartySettings = { name: string; ignoreLimits: boolean; version: string };
 

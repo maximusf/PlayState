@@ -60,12 +60,16 @@ model Party {
   rolledAt     DateTime?
   // Set by the host. When true, games too small for the group still count as playable.
   ignoreLimits Boolean   @default(false)
+  // When the party is removed. The host picks the length at the start and can extend it once.
+  expiresAt DateTime
+  extended  Boolean  @default(false)
 
   members PartyMember[]
 
   createdAt DateTime @default(now())
 
   @@index([hostId])
+  @@index([expiresAt])
 }
 
 // One row per player in a party. userId is the Clerk user ID.

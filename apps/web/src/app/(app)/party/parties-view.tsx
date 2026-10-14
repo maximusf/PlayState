@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage, useApi, type PartySummary } from "@/lib/api";
 import { RowListSkeleton } from "@/components/skeletons";
+import { KebabMenu } from "@/components/kebab-menu";
 import { CountedInput, Notice } from "@/components/ui";
 
 type State =
@@ -22,18 +23,43 @@ export function players(count: number): string {
 // Built on first use, in the browser, so it picks up the reader's own settings.
 // Building it when this file loads could use the server's settings instead.
 let expiryFormat: Intl.DateTimeFormat | null = null;
+let longExpiryFormat: Intl.DateTimeFormat | null = null;
+
+// How long a host can choose to keep a party for.
+export const LIFETIMES = [
+  { hours: 3, label: "3 hours" },
+  { hours: 24, label: "24 hours" },
+  { hours: 168, label: "7 days" },
+];
 
 // When a party ends, in the reader's own time zone and their 12 or 24 hour clock.
-// The day name stays in English, like the rest of the site. Parties last one day.
+// The day name stays in English, like the rest of the site. A party that ends more than a
+// day away also names the date, since the day name alone could mean this week or next.
 export function expires(expiresAt: string): string {
+  const hour12 = new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12;
+  const end = new Date(expiresAt);
+
+  if (end.getTime() - Date.now() > 24 * 60 * 60 * 1000) {
+    longExpiryFormat ??= new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12,
+    });
+
+    return `Expires ${longExpiryFormat.format(end)}`;
+  }
+
   expiryFormat ??= new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     hour: "numeric",
     minute: "2-digit",
-    hour12: new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12,
+    hour12,
   });
 
-  return `Expires ${expiryFormat.format(new Date(expiresAt))}`;
+  return `Expires ${expiryFormat.format(end)}`;
 }
 
 export function PartiesView() {
@@ -42,8 +68,13 @@ export function PartiesView() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [lifetimeHours, setLifetimeHours] = useState(24);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // The party a Leave or End is waiting on a yes for, and any error from the last one.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function openDialog() {
@@ -82,7 +113,7 @@ export function PartiesView() {
     try {
       const party = await api<PartySummary>("/api/parties", {
         method: "POST",
-        body: { name, displayName },
+        body: { name, displayName, lifetimeHours },
       });
       router.push(`/party/${party.code}`);
     } catch (error) {
@@ -91,12 +122,37 @@ export function PartiesView() {
     }
   }
 
+  // Ending deletes the party for everyone. Leaving takes only this player out of it.
+  async function leaveOrEnd(party: PartySummary) {
+    setWorking(true);
+    setRowError(null);
+
+    try {
+      await api(party.isHost ? `/api/parties/${encodeURIComponent(party.code)}` : `/api/parties/${encodeURIComponent(party.code)}/members/me`, {
+        method: "DELETE",
+      });
+      setState((current) =>
+        current.status === "ready"
+          ? { status: "ready", parties: current.parties.filter((item) => item.code !== party.code) }
+          : current,
+      );
+      setConfirming(null);
+    } catch (error) {
+      setRowError(
+        `${party.isHost ? "The party was not ended." : "You are still in that party."} ${errorMessage(error)}`,
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl">
       <h1 className="font-pixel text-6xl leading-[0.9] text-forest">Play together</h1>
       <p className="mt-4 text-lg text-slate">
         Start a party, send your friends the link, and see the multiplayer games you all own. A
-        party lasts one day, and you can be in three at a time.
+        party lasts 3 hours, 24 hours or 7 days, as the host chooses, and you can be in three at a
+        time.
       </p>
 
       <div className="mt-8 px-1 pb-3">
@@ -149,6 +205,31 @@ export function PartiesView() {
               />
             </div>
           </div>
+          <fieldset>
+            <legend className="pixel-label text-muted">How long it lasts</legend>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {LIFETIMES.map((option) => (
+                <label
+                  key={option.hours}
+                  className={`flex min-h-11 cursor-pointer items-center gap-2 px-3 font-semibold text-forest has-[:focus-visible]:outline has-[:focus-visible]:outline-[3px] has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-forest ${
+                    lifetimeHours === option.hours
+                      ? "bg-mint ring-2 ring-forest ring-inset"
+                      : "bg-surface ring-2 ring-fern ring-inset"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="party-lifetime"
+                    value={option.hours}
+                    checked={lifetimeHours === option.hours}
+                    onChange={() => setLifetimeHours(option.hours)}
+                    className="sr-only"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           {createError && <Notice tone="error">{createError}</Notice>}
           <div className="flex flex-wrap items-center gap-5 px-1 pb-2">
             <button type="submit" disabled={creating} className="btn btn-primary">
@@ -184,11 +265,18 @@ export function PartiesView() {
 
           {state.status === "ready" && state.parties.length > 0 && (
             <ul className="space-y-4 px-1">
+              {rowError && (
+                <li>
+                  <Notice tone="error">{rowError}</Notice>
+                </li>
+              )}
               {state.parties.map((party) => (
                 <li key={party.code}>
+                  {/* The menu sits beside the link, not inside it, so opening it never opens the party. */}
+                  <div className="flex items-center gap-1 bg-surface pr-2 pixel-frame transition duration-200 ease-out [--frame:var(--color-fern)] focus-within:-translate-y-1 focus-within:[--frame:var(--color-emerald)] hover:-translate-y-1 hover:[--frame:var(--color-emerald)]">
                   <Link
                     href={`/party/${party.code}`}
-                    className="flex items-center justify-between gap-4 bg-surface p-4 pixel-frame transition duration-200 ease-out [--frame:var(--color-fern)] hover:-translate-y-1 hover:[--frame:var(--color-emerald)] focus-visible:-translate-y-1 focus-visible:[--frame:var(--color-emerald)]"
+                    className="flex min-w-0 flex-1 items-center justify-between gap-4 p-4"
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <span className="truncate text-lg font-bold text-forest">{party.name}</span>
@@ -203,6 +291,46 @@ export function PartiesView() {
                       <span className="block">{expires(party.expiresAt)}</span>
                     </span>
                   </Link>
+                  <KebabMenu
+                    label={`Actions for ${party.name}`}
+                    disabled={working}
+                    items={[
+                      {
+                        label: party.isHost ? "End party" : "Leave party",
+                        danger: true,
+                        onSelect: () => {
+                          setRowError(null);
+                          setConfirming(party.code);
+                        },
+                      },
+                    ]}
+                  />
+                  </div>
+                  {confirming === party.code && (
+                    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 px-1 pb-2">
+                      <p role="status" className="font-semibold text-forest">
+                        {party.isHost
+                          ? `End ${party.name} for all ${players(party.memberCount)}?`
+                          : `Leave ${party.name}?`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => leaveOrEnd(party)}
+                        disabled={working}
+                        className="btn btn-secondary text-danger"
+                      >
+                        {working ? "Working" : party.isHost ? "Yes, end it" : "Yes, leave"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirming(null)}
+                        disabled={working}
+                        className="btn btn-secondary"
+                      >
+                        {party.isHost ? "Keep it" : "Stay"}
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

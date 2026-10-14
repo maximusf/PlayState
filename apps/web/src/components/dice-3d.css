@@ -1,0 +1,104 @@
+/* A cube that tumbles across the page and lands on one face. Pure CSS 3D, no library.
+   --dice-delay is how long to wait before the tumble starts, and is negative for a browser
+   that joined late, so every browser is at the same point of the roll at the same moment.
+   --dice-rx and --dice-ry turn the cube so the chosen face ends up facing the player. */
+
+.dice-scene {
+  --dice-size: 7rem;
+  --dice-ms: 2600ms;
+  position: relative;
+  width: var(--dice-size);
+  height: var(--dice-size);
+  perspective: 700px;
+}
+
+.dice-hop {
+  width: 100%;
+  height: 100%;
+  animation: dice-hop var(--dice-ms) linear var(--dice-delay, 0ms) both;
+}
+
+.dice-cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: dice-tumble var(--dice-ms) cubic-bezier(0.18, 0.7, 0.25, 1) var(--dice-delay, 0ms) both;
+  transform: rotateX(var(--dice-rx)) rotateY(var(--dice-ry));
+}
+
+.dice-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  gap: 0.375rem;
+  padding: 0.75rem;
+  background: var(--color-surface);
+  border: 4px solid var(--color-forest);
+  backface-visibility: hidden;
+}
+
+.dice-pip {
+  background: var(--color-forest);
+}
+
+/* The one pip on the face that lands up is green, like the chosen tile on the Pick screen. */
+.dice-face[data-value="1"] .dice-pip {
+  background: var(--color-emerald);
+}
+
+.dice-face[data-value="1"] { transform: translateZ(calc(var(--dice-size) / 2)); }
+.dice-face[data-value="6"] { transform: rotateY(180deg) translateZ(calc(var(--dice-size) / 2)); }
+.dice-face[data-value="3"] { transform: rotateY(90deg) translateZ(calc(var(--dice-size) / 2)); }
+.dice-face[data-value="4"] { transform: rotateY(-90deg) translateZ(calc(var(--dice-size) / 2)); }
+.dice-face[data-value="2"] { transform: rotateX(90deg) translateZ(calc(var(--dice-size) / 2)); }
+.dice-face[data-value="5"] { transform: rotateX(-90deg) translateZ(calc(var(--dice-size) / 2)); }
+
+/* Whole turns on every axis, ending on the resting angle. Extra turns are invisible at the end. */
+@keyframes dice-tumble {
+  from {
+    transform: rotateX(calc(var(--dice-rx) + 900deg)) rotateY(calc(var(--dice-ry) + 1260deg))
+      rotateZ(360deg);
+  }
+  to {
+    transform: rotateX(var(--dice-rx)) rotateY(var(--dice-ry)) rotateZ(0deg);
+  }
+}
+
+/* Thrown up, then three bounces that get smaller. */
+@keyframes dice-hop {
+  0% { transform: translateY(0); }
+  18% { transform: translateY(-3.5rem); }
+  36% { transform: translateY(0); }
+  54% { transform: translateY(-1.75rem); }
+  70% { transform: translateY(0); }
+  84% { transform: translateY(-0.5rem); }
+  100% { transform: translateY(0); }
+}
+
+.dice-shadow {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -0.75rem;
+  height: 0.5rem;
+  background: var(--color-forest);
+  opacity: 0.25;
+  animation: dice-shadow var(--dice-ms) linear var(--dice-delay, 0ms) both;
+}
+
+@keyframes dice-shadow {
+  0%, 36%, 70%, 100% { transform: scaleX(1); opacity: 0.25; }
+  18% { transform: scaleX(0.5); opacity: 0.1; }
+  54% { transform: scaleX(0.75); opacity: 0.18; }
+  84% { transform: scaleX(0.9); opacity: 0.22; }
+}
+
+/* For players who ask their device for less motion the cube simply rests on its face. */
+@media (prefers-reduced-motion: reduce) {
+  .dice-cube {
+    animation: none;
+    transform: rotateX(var(--dice-rx)) rotateY(var(--dice-ry));
+  }
+}
