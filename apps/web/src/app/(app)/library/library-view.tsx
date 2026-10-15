@@ -15,9 +15,6 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; entries: LibraryEntry[] };
 
-// How many genre filters to offer. More than this wraps badly on a phone.
-const MAX_FILTERS = 6;
-
 // A hovered or focused cover eases upward off the page onto a hard pixel shadow.
 const coverLift =
   "transition duration-200 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_8px_0_0_var(--color-forest)] group-focus-visible:-translate-y-1 group-focus-visible:shadow-[0_8px_0_0_var(--color-forest)]";
@@ -360,11 +357,67 @@ type Confirm = { ids: string[]; titles: string[]; anchorId: string | null };
 // Library deletes go out in batches the API accepts.
 const DELETE_BATCH = 200;
 
+// Counts how many games carry each value, most common first. Each list is one game's values.
+function countValues(lists: string[][]): [string, number][] {
+  const counts = new Map<string, number>();
+
+  for (const list of lists) {
+    for (const name of new Set(list)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function toggled(current: ReadonlySet<string>, name: string): ReadonlySet<string> {
+  const next = new Set(current);
+  if (!next.delete(name)) next.add(name);
+  return next;
+}
+
+// One group of toggle chips in the filters dialog. It is left out when there is nothing to choose.
+function FilterGroup({
+  label,
+  options,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  options: [string, number][];
+  selected: ReadonlySet<string>;
+  onToggle: (name: string) => void;
+}) {
+  if (options.length < 2) return null;
+
+  return (
+    <div role="group" aria-label={`Filter by ${label.toLowerCase()}`}>
+      <p className="pixel-label text-muted">{label}</p>
+      <div className="mt-3 flex flex-wrap gap-2.5">
+        {options.map(([name, total]) => (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={selected.has(name)}
+            onClick={() => onToggle(name)}
+            className={`${filterChip} ${
+              selected.has(name)
+                ? "bg-forest text-surface"
+                : "bg-surface text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
+            }`}
+          >
+            {name} {total}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function LibraryView() {
   const api = useApi();
   const [state, setState] = useState<State>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
-  const [genre, setGenre] = useState<string | null>(null);
+  const [genres, setGenres] = useState<ReadonlySet<string>>(new Set());
+  const [modes, setModes] = useState<ReadonlySet<string>>(new Set());
   const [familyOnly, setFamilyOnly] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -414,35 +467,33 @@ export function LibraryView() {
 
   const entries = useMemo(() => (state.status === "ready" ? state.entries : []), [state]);
 
-  // The most common genres in this library, with how many games carry each.
-  const filters = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const entry of entries) {
-      for (const name of new Set(entry.game.genres.map(shortGenre))) {
-        counts.set(name, (counts.get(name) ?? 0) + 1);
-      }
-    }
-
-    return [...counts]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, MAX_FILTERS);
-  }, [entries]);
+  // Every genre in this library, with how many games carry each, most common first.
+  const filters = useMemo(
+    () => countValues(entries.map((entry) => entry.game.genres.map(shortGenre))),
+    [entries],
+  );
+  // The same for game modes such as single player and co-op.
+  const modeFilters = useMemo(
+    () => countValues(entries.map((entry) => entry.game.gameModes)),
+    [entries],
+  );
 
   const familyCount = entries.filter((entry) => entry.familyShared).length;
   const term = query.trim().toLowerCase();
   const visible = entries.filter(
     (entry) =>
-      (!genre || entry.game.genres.some((name) => shortGenre(name) === genre)) &&
+      // Picks within one group match any of them. Picks across groups must all match.
+      (genres.size === 0 || entry.game.genres.some((name) => genres.has(shortGenre(name)))) &&
+      (modes.size === 0 || entry.game.gameModes.some((name) => modes.has(name))) &&
       (!familyOnly || entry.familyShared) &&
       (!term || entry.game.title.toLowerCase().includes(term)),
   );
   const sorted = sortEntries(visible, sort, descending);
   const count = entries.length;
-  const filtered = genre !== null || familyOnly || term !== "";
+  const filtered = genres.size > 0 || modes.size > 0 || familyOnly || term !== "";
   // What the Filters button counts. The title search sits in the page, so it is not included.
-  const activeFilters = Number(genre !== null) + Number(familyOnly);
-  const canFilter = filters.length > 1 || familyCount > 0;
+  const activeFilters = genres.size + modes.size + Number(familyOnly);
+  const canFilter = filters.length > 1 || modeFilters.length > 1 || familyCount > 0;
 
   // Games gone from the library drop out of the selection without any bookkeeping.
   const picked = entries.filter((entry) => selected.has(entry.id));
@@ -451,9 +502,14 @@ export function LibraryView() {
   // The tile belongs to the full, large-cover grid. Search results and filters hide it.
   const showAddTile = !filtered && layout === "grid" && !selecting;
 
-  function clearFilters() {
-    setGenre(null);
+  function clearChoices() {
+    setGenres(new Set());
+    setModes(new Set());
     setFamilyOnly(false);
+  }
+
+  function clearFilters() {
+    clearChoices();
     setQuery("");
   }
 
@@ -637,11 +693,11 @@ export function LibraryView() {
         {count > 0 && (
           <div className="flex flex-wrap gap-5 px-1 pb-3">
             <RandomDiceLink count={count} />
-            <Link href="/library/add" className="btn btn-secondary">
-              Add a game
-            </Link>
             <Link href="/pick" className="btn btn-primary">
               Pick a game
+            </Link>
+            <Link href="/library/add" className="btn btn-secondary">
+              Add a game
             </Link>
           </div>
         )}
@@ -800,8 +856,9 @@ export function LibraryView() {
             <Notice tone="info">
               No games in your library match
               {term && <> &quot;{query.trim()}&quot;</>}
-              {term && (genre || familyOnly) && " in"}
-              {genre && ` ${genre}`}
+              {term && (genres.size > 0 || modes.size > 0 || familyOnly) && " in"}
+              {genres.size > 0 && ` ${[...genres].join(" or ")}`}
+              {modes.size > 0 && ` ${genres.size > 0 ? "with " : ""}${[...modes].join(" or ")}`}
               {familyOnly && " shared through Steam Family"}.
             </Notice>
             <button type="button" onClick={clearFilters} className="btn btn-secondary mx-1">
@@ -972,28 +1029,19 @@ export function LibraryView() {
 
       <Dialog open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filters">
         <div className="space-y-6">
-          {filters.length > 1 && (
-            <div role="group" aria-label="Filter by genre">
-              <p className="pixel-label text-muted">Genre</p>
-              <div className="mt-3 flex flex-wrap gap-2.5">
-                {filters.map(([name, total]) => (
-                  <button
-                    key={name}
-                    type="button"
-                    aria-pressed={genre === name}
-                    onClick={() => setGenre(genre === name ? null : name)}
-                    className={`${filterChip} ${
-                      genre === name
-                        ? "bg-forest text-surface"
-                        : "bg-surface text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
-                    }`}
-                  >
-                    {name} {total}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <FilterGroup
+            label="Genre"
+            options={filters}
+            selected={genres}
+            onToggle={(name) => setGenres((current) => toggled(current, name))}
+          />
+
+          <FilterGroup
+            label="Game mode"
+            options={modeFilters}
+            selected={modes}
+            onToggle={(name) => setModes((current) => toggled(current, name))}
+          />
 
           {familyCount > 0 && (
             <div role="group" aria-label="Filter by source">
@@ -1014,15 +1062,19 @@ export function LibraryView() {
               </div>
             </div>
           )}
+
+          {activeFilters > 1 && (
+            <p className="text-sm text-muted">
+              Choices in the same group match any of them. Choices in different groups must all
+              match.
+            </p>
+          )}
         </div>
 
         <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t-4 border-dotted border-fern pt-5">
           <button
             type="button"
-            onClick={() => {
-              setGenre(null);
-              setFamilyOnly(false);
-            }}
+            onClick={clearChoices}
             disabled={activeFilters === 0}
             className="btn btn-secondary"
           >
