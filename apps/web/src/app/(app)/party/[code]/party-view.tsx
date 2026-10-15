@@ -11,7 +11,6 @@ import {
   type PartyInvite,
   type PartyNominations,
   type PartyRoll,
-  type PartySummary,
   type PartySettings,
 } from "@/lib/api";
 import { Dice3D, DICE_MS } from "@/components/dice-3d";
@@ -400,7 +399,7 @@ function PartyGames({
       )}
 
       {tiles.length > 0 && (
-        <ul className="mt-6 grid grid-cols-3 gap-x-4 gap-y-5 px-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+        <ul className="mt-6 grid grid-cols-3 gap-x-4 gap-y-5 px-1 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-5 xl:grid-cols-6">
           {tiles.map((tile) => {
             const isRolled = tile.igdbId === rolledId;
             // With a pick on show, every other game steps back so the winner stands alone.
@@ -654,25 +653,6 @@ export function PartyView({ code }: { code: string }) {
     }
   }
 
-  // Adds a day, once. The server says whether the party can still be extended.
-  async function extend() {
-    setBusy(true);
-    setActionError(null);
-
-    try {
-      const changes = await api<PartySummary>(`${path}/extend`, { method: "POST" });
-      setState((current) =>
-        current.status === "ready"
-          ? { status: "ready", party: { ...current.party, ...changes } }
-          : current,
-      );
-    } catch (error) {
-      setActionError(`The party was not extended. ${errorMessage(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   // Ending deletes the party for everyone. Leaving takes only this player out of it.
   async function leaveOrEnd(end: boolean) {
     setLeaving(true);
@@ -777,7 +757,6 @@ export function PartyView({ code }: { code: string }) {
 
         {state.status === "ready" && (
           <div>
-            <PartyReactions code={code} />
             {/* The backdrop wraps everything down to the players list. */}
             <PartyBackdrop id={state.party.backdropId}>
             <div className="flex flex-wrap items-end justify-between gap-6">
@@ -799,13 +778,6 @@ export function PartyView({ code }: { code: string }) {
                           Rename
                         </button>
                       )}
-                      {/* One extra day, once. After that the party says it has been extended. */}
-                      {state.party.isHost && !state.party.extended && (
-                        <button type="button" onClick={extend} disabled={busy} className={plainLink}>
-                          Extend by a day
-                        </button>
-                      )}
-                      {state.party.extended && <span>Extended</span>}
                     </p>
                   </>
                 ) : (
@@ -994,6 +966,7 @@ export function PartyView({ code }: { code: string }) {
                 </li>
               ))}
             </ul>
+            <PartyReactions code={code} />
             </PartyBackdrop>
 
             {actionError && (
@@ -1002,6 +975,7 @@ export function PartyView({ code }: { code: string }) {
               </div>
             )}
 
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start lg:gap-8">
             <PartyGames
               party={state.party}
               path={path}
@@ -1016,6 +990,7 @@ export function PartyView({ code }: { code: string }) {
             />
 
             <PartyChat path={path} />
+            </div>
           </div>
         )}
       </div>

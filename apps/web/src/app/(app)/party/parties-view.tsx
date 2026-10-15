@@ -13,6 +13,9 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; parties: PartySummary[] };
 
+// How many parties a player can be in at once. This matches MAX_PARTIES_PER_USER in the API.
+const MAX_PARTIES = 3;
+
 const field =
   "min-h-11 w-full min-w-0 bg-surface px-3 text-forest ring-2 ring-fern ring-inset placeholder:text-muted/70";
 
@@ -150,9 +153,8 @@ export function PartiesView() {
     <div className="mx-auto max-w-2xl">
       <h1 className="font-pixel text-6xl leading-[0.9] text-forest">Play together</h1>
       <p className="mt-4 text-lg text-slate">
-        Start a party, send your friends the link, and see the multiplayer games you all own. A
-        party lasts 3 hours, 24 hours or 7 days, as the host chooses, and you can be in three at a
-        time.
+        Start a party, send your friends the link, and see the multiplayer games you all own.{" "}
+        <span aria-hidden="true">🎉</span>
       </p>
 
       <div className="mt-8 px-1 pb-3">
@@ -248,7 +250,20 @@ export function PartiesView() {
       </dialog>
 
       <section className="mt-10">
-        <h2 className="font-pixel text-4xl leading-none text-forest">Your parties</h2>
+        <div className="flex items-center gap-4">
+          <h2 className="font-pixel text-4xl leading-none text-forest">Your parties</h2>
+          {state.status === "ready" && (
+            <span
+              role="img"
+              aria-label={`In ${state.parties.length} of ${MAX_PARTIES} parties`}
+              className={`pixel-label px-2 py-1 ring-2 ring-inset ${
+                state.parties.length >= MAX_PARTIES ? "text-forest ring-forest" : "text-muted ring-fern"
+              }`}
+            >
+              {state.parties.length}/{MAX_PARTIES}
+            </span>
+          )}
+        </div>
         <div className="mt-5">
           {state.status === "loading" && (
             <RowListSkeleton label="Loading your parties" count={2} cover={false} />

@@ -11,8 +11,6 @@ const MAX_PARTIES_PER_USER = 3;
 const HOUR_MS = 60 * 60 * 1000;
 // The host picks how long a party lasts. The default is one evening of deciding what to play.
 const DEFAULT_LIFETIME_HOURS = 24;
-// Extending, which can be done once, adds this long to when the party would otherwise end.
-const EXTENSION_MS = 24 * HOUR_MS;
 // How many games one member can have nominated at a time.
 const MAX_NOMINATIONS = 2;
 
@@ -32,7 +30,6 @@ export type PartySummary = {
   memberCount: number;
   expiresAt: string;
   // Whether the host has already used the one extension.
-  extended: boolean;
   // Whether the viewer started this party, and so can end it.
   isHost: boolean;
 };
@@ -74,8 +71,8 @@ export type PartySettings = { name: string; ignoreLimits: boolean; version: stri
 // serverNow is the server clock when the answer was made, so browsers can line their dice up.
 export type PartyRoll = { rolledIgdbId: number; rolledAt: string; serverNow: string; version: string };
 
-function times(party: { expiresAt: Date; extended: boolean }) {
-  return { expiresAt: party.expiresAt.toISOString(), extended: party.extended };
+function times(party: { expiresAt: Date }) {
+  return { expiresAt: party.expiresAt.toISOString() };
 }
 
 // Expired parties are removed whenever someone lists, starts or joins one, so no
@@ -557,31 +554,6 @@ export async function transferHost(userId: string, code: string, memberId: strin
   }
 
   await prisma.party.update({ where: { id: party.id }, data: { hostId: member.userId } });
-}
-
-// Adds a day to the party. This can be done once.
-export async function extendParty(userId: string, code: string): Promise<PartySummary> {
-  const party = await findParty(code);
-  requireHost(party, userId, "extend it");
-
-  const expiresAt = new Date(party.expiresAt.getTime() + EXTENSION_MS);
-  // The flag is part of the match, so two quick presses cannot add two days.
-  const { count } = await prisma.party.updateMany({
-    where: { id: party.id, extended: false },
-    data: { expiresAt, extended: true },
-  });
-
-  if (count === 0) {
-    throw new AppError(409, "PARTY_ALREADY_EXTENDED", "This party has already been extended once.");
-  }
-
-  return {
-    code: party.code,
-    name: party.name,
-    memberCount: party.members.length,
-    ...times({ expiresAt, extended: true }),
-    isHost: true,
-  };
 }
 
 // Ends a party for everyone. Only the player who started it may do this.
