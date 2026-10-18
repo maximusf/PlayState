@@ -106,6 +106,8 @@ export type PartyDetail = PartySummary & {
   nominations: { igdbId: number; memberId: string }[];
   // The host's picture for the top of the party page. Null means none.
   backdropId: string | null;
+  // How the host's dice roll is shown to every member. An id from lib/party-roll-styles.ts.
+  rollStyle: string;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };

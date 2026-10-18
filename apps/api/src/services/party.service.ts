@@ -60,6 +60,8 @@ export type PartyDetail = PartySummary & {
   nominations: { igdbId: number; memberId: string }[];
   // The host's picture for the top of the party page. Null means none.
   backdropId: string | null;
+  // How the host's dice roll is shown to every member.
+  rollStyle: string;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
@@ -91,6 +93,7 @@ type VersionedParty = {
   ignoreLimits: boolean;
   expiresAt: Date;
   backdropId: string | null;
+  rollStyle: string;
   members: { id: string; displayName: string; hatId: string | null }[];
   nominations: { userId: string; igdbId: number }[];
 };
@@ -108,6 +111,7 @@ function versionOf(party: VersionedParty): string {
     party.members.map((member) => [member.id, member.displayName, member.hatId]),
     party.nominations.map((nomination) => [nomination.userId, nomination.igdbId]),
     party.backdropId,
+    party.rollStyle,
   ];
 
   return createHash("sha256").update(JSON.stringify(visible)).digest("base64url").slice(0, 16);
@@ -350,6 +354,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     ignoreLimits: party.ignoreLimits,
     nominations,
     backdropId: party.backdropId,
+    rollStyle: party.rollStyle,
     version: versionOf(party),
   };
 }
@@ -507,6 +512,20 @@ export async function setPartyBackdrop(
   await prisma.party.update({ where: { id: party.id }, data: { backdropId } });
 
   return { backdropId, version: versionOf({ ...party, backdropId }) };
+}
+
+// Sets how the dice roll is shown to every member. Host only.
+export async function setPartyRollStyle(
+  userId: string,
+  code: string,
+  rollStyle: string,
+): Promise<{ rollStyle: string; version: string }> {
+  const party = await findParty(code);
+  requireHost(party, userId, "change the roll animation");
+
+  await prisma.party.update({ where: { id: party.id }, data: { rollStyle } });
+
+  return { rollStyle, version: versionOf({ ...party, rollStyle }) };
 }
 
 // Takes a player out of the party and stops them rejoining with the link.

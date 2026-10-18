@@ -1,0 +1,157 @@
+/* The party roll animations that show game covers. The 3D ones are plain CSS. Their parts are moved
+   by script on every frame, so this file only says what each part looks like. */
+
+/* Cover die: a cube in a tray, seen from above and in front. */
+.roll-scene {
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-width: 340px;
+  height: 250px;
+  place-items: center;
+  overflow: hidden;
+  perspective: 900px;
+}
+
+.roll-world {
+  position: relative;
+  width: 0;
+  height: 0;
+  transform: translateY(40px) rotateX(-58deg);
+  transform-style: preserve-3d;
+}
+
+.roll-floor {
+  position: absolute;
+  top: -108px;
+  left: -150px;
+  width: 300px;
+  height: 216px;
+  background: var(--color-pine);
+  box-shadow: inset 0 0 0 5px var(--color-forest);
+  transform: rotateX(90deg);
+}
+
+.roll-shadow {
+  position: absolute;
+  top: -30px;
+  left: -30px;
+  width: 60px;
+  height: 60px;
+  background: var(--color-forest);
+}
+
+.roll-cube {
+  --s: 60px;
+  position: absolute;
+  top: -30px;
+  left: -30px;
+  width: 60px;
+  height: 60px;
+  transform-style: preserve-3d;
+}
+
+.roll-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 3px solid var(--color-forest);
+  backface-visibility: hidden;
+}
+
+.roll-face[data-face="1"] { transform: translateZ(calc(var(--s) / 2)); }
+.roll-face[data-face="6"] { transform: rotateY(180deg) translateZ(calc(var(--s) / 2)); }
+.roll-face[data-face="3"] { transform: rotateY(90deg) translateZ(calc(var(--s) / 2)); }
+.roll-face[data-face="4"] { transform: rotateY(-90deg) translateZ(calc(var(--s) / 2)); }
+.roll-face[data-face="2"] { transform: rotateX(90deg) translateZ(calc(var(--s) / 2)); }
+.roll-face[data-face="5"] { transform: rotateX(-90deg) translateZ(calc(var(--s) / 2)); }
+
+/* Cover carousel: a row of covers that swings past a fixed middle. */
+.roll-flow {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  height: 190px;
+  overflow: hidden;
+  perspective: 800px;
+}
+
+.roll-flow-item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: none;
+  width: 78px;
+  margin: -52px 0 0 -39px;
+  will-change: transform;
+}
+
+/* Triple slot: three reels with one row showing. */
+.roll-slots {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.roll-reel {
+  position: relative;
+  width: 84px;
+  height: 270px;
+  overflow: hidden;
+  background: var(--color-sage);
+  box-shadow: inset 0 0 0 3px var(--color-fern);
+}
+
+.roll-reel-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.roll-reel-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 90px;
+}
+
+/* The box over the middle row, which flashes when all three reels match. */
+.roll-slot-mark {
+  position: absolute;
+  top: 90px;
+  right: -4px;
+  left: -4px;
+  z-index: 3;
+  height: 90px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 4px var(--color-emerald);
+}
+
+.roll-slots.is-hit .roll-slot-mark {
+  background: color-mix(in srgb, var(--color-emerald) 22%, transparent);
+  box-shadow: inset 0 0 0 4px var(--color-emerald), 0 0 0 4px var(--color-forest);
+}
+
+/* Card shuffle: covers that swirl, gather and pop out. */
+.roll-cards {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  height: 240px;
+}
+
+.roll-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 66px;
+  margin: -44px 0 0 -33px;
+  will-change: transform;
+}
