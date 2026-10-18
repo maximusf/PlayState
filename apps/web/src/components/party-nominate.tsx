@@ -86,6 +86,7 @@ export function useNominations({
 
   return {
     nominations,
+    youId: you?.id,
     mine,
     nominatedIds,
     nominatedCount,
@@ -104,7 +105,8 @@ export function useNominations({
 
 export type Nominations = ReturnType<typeof useNominations>;
 
-// A star in the member's colour, shown on the cover of every game they put forward.
+// A star in each other member's colour, shown on the cover of every game they put forward. The
+// viewer's own nominations show as the yellow star in the corner instead.
 export function NominatedBadge({
   nominators,
   colours,
@@ -115,7 +117,7 @@ export function NominatedBadge({
   if (nominators.length === 0) return null;
 
   return (
-    <span className="absolute left-1 top-1 flex flex-wrap gap-1">
+    <span className="absolute right-1 top-1 flex flex-wrap justify-end gap-1">
       {nominators.map((nomination) => (
         <span
           key={nomination.memberId}
@@ -129,8 +131,9 @@ export function NominatedBadge({
   );
 }
 
-// The Nominate button under a game tile. It says why it is off when the member is at their limit.
-export function NominateButton({
+// A star in a game's top left corner. It shows on hover or focus, and turns yellow and stays once
+// the member has nominated the game. It says why it is off when the member is at their limit.
+export function NominateStar({
   igdbId,
   title,
   nominations,
@@ -146,97 +149,23 @@ export function NominateButton({
   const reason = blocked
     ? `You have nominated ${MAX_NOMINATIONS} games. Remove one to nominate another.`
     : null;
-  const pending = nominations.pendingId === igdbId;
 
   return (
-    <>
-      <button
-        type="button"
-        aria-pressed={nominated}
-        aria-label={`${nominated ? "Remove your nomination for" : "Nominate"} ${title}`}
-        aria-describedby={reason ? `nominate-reason-${igdbId}` : undefined}
-        title={reason ?? undefined}
-        disabled={disabled || blocked || nominations.pendingId !== null}
-        onClick={() => nominations.toggle(igdbId)}
-        className={`flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 px-2 text-sm font-bold ring-2 ring-forest ring-inset hover:bg-mint disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent ${
-          nominated ? "bg-mint text-forest" : "bg-surface text-forest"
-        }`}
-      >
-        <Star className="size-4" />
-        {pending ? "Saving" : nominated ? "Nominated" : "Nominate"}
-      </button>
-      {reason && (
-        <span id={`nominate-reason-${igdbId}`} className="block text-xs text-muted">
-          {reason}
-        </span>
-      )}
-    </>
-  );
-}
-
-// Who nominated what, in a line above the tiles. Also tells the party how the roll will work.
-export function NominationStrip({
-  nominations,
-  members,
-  games,
-  colours,
-  isHost,
-}: {
-  nominations: Nominations;
-  members: PartyDetail["members"];
-  games: { igdbId: number; title: string }[];
-  colours: Map<string, string>;
-  isHost: boolean;
-}) {
-  const titles = new Map(games.map((game) => [game.igdbId, game.title]));
-  const names = new Map(members.map((member) => [member.id, member.displayName]));
-
-  return (
-    <div className="mx-1 mt-5 bg-surface p-4 pixel-frame [--frame:var(--color-fern)]">
-      <p className="pixel-label flex items-center gap-2 text-pine">
-        <Star className="size-4" />
-        Nominations
-      </p>
-
-      {nominations.nominations.length === 0 ? (
-        <p className="mt-2 text-muted">
-          Nominate up to {MAX_NOMINATIONS} games you would like to play. With two or more
-          nominated, the host&apos;s dice rolls from those.
-        </p>
-      ) : (
-        <ul className="mt-3 flex flex-wrap gap-2">
-          {nominations.nominations.map((nomination) => (
-            <li
-              key={`${nomination.memberId}-${nomination.igdbId}`}
-              className="flex min-h-9 items-center gap-2 bg-mint px-2 text-sm font-semibold text-forest"
-            >
-              <span style={{ color: colours.get(nomination.memberId) }} className="bg-surface p-1">
-                <Star className="size-3" />
-              </span>
-              <span>
-                {titles.get(nomination.igdbId) ?? "A game"}
-                <span className="font-normal text-muted">
-                  {" "}
-                  by {names.get(nomination.memberId) ?? "a player"}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {nominations.nominations.length > 0 && (
-        <p className="mt-3 text-sm text-muted">
-          {isHost
-            ? nominations.nominatedCount >= 2
-              ? "Nominations clear after each roll."
-              : "Add one more nominated game and your roll will come from the nominated games."
-            : nominations.nominatedCount >= 2
-              ? "The host rolls from the nominated games. Nominations clear after each roll."
-              : "The host rolls from everything until two games are nominated."}
-        </p>
-      )}
-    </div>
+    <button
+      type="button"
+      aria-pressed={nominated}
+      aria-label={`${nominated ? "Remove your nomination for" : "Nominate"} ${title}`}
+      title={reason ?? (nominated ? "Nominated" : "Nominate")}
+      disabled={disabled || blocked || nominations.pendingId !== null}
+      onClick={() => nominations.toggle(igdbId)}
+      className={`absolute left-1 top-1 flex size-9 cursor-pointer items-center justify-center transition-opacity hover:bg-forest/70 focus-visible:opacity-100 disabled:cursor-not-allowed [@media(hover:none)]:opacity-100 ${
+        nominated
+          ? "bg-forest/70 text-[#facc15] opacity-100"
+          : "bg-forest/40 text-surface/80 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+      }`}
+    >
+      <Star className="size-5" />
+    </button>
   );
 }
 

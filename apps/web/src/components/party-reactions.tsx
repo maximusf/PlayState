@@ -207,7 +207,7 @@ export function PartyReactions({ code }: { code: string }) {
       </div>
 
       {/* Part of the page, not an overlay. The emoji still float up over everything. */}
-      <div className="mt-6 flex flex-col items-start gap-2">
+      <div className="flex flex-col items-start gap-2">
         {badge && (
           <p
             role="status"
@@ -233,7 +233,7 @@ export function PartyReactions({ code }: { code: string }) {
         <div
           role="group"
           aria-label="Send a reaction"
-          className="flex max-w-full gap-1 overflow-x-auto bg-surface p-1 shadow-[-4px_0_0_0_var(--color-forest),4px_0_0_0_var(--color-forest),0_-4px_0_0_var(--color-forest),0_4px_0_0_var(--color-forest)]"
+          className="flex max-w-full flex-wrap gap-1 bg-surface p-1 shadow-[-4px_0_0_0_var(--color-forest),4px_0_0_0_var(--color-forest),0_-4px_0_0_var(--color-forest),0_4px_0_0_var(--color-forest)]"
         >
           {REACTION_EMOJIS.map((emoji) => (
             <button
