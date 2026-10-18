@@ -26,8 +26,6 @@ function toLibraryEntry(entry: UserGameWithGame) {
     addedAt: entry.createdAt.toISOString(),
     // The player's own tag for how long their sittings with this game are.
     sessionLength: entry.sessionLength as SessionLength | null,
-    // Added by hand as a game shared through Steam Family.
-    familyShared: entry.familyShared,
     game: {
       igdbId: entry.game.igdbId,
       title: entry.game.title,
@@ -99,11 +97,7 @@ export async function getLibraryEntry(userId: string, id: string): Promise<Libra
   };
 }
 
-export async function addGameToLibrary(
-  userId: string,
-  igdbId: number,
-  familyShared = false,
-): Promise<LibraryEntry> {
+export async function addGameToLibrary(userId: string, igdbId: number): Promise<LibraryEntry> {
   // Game data always comes from IGDB, never from the client.
   const details = await getGameDetails(igdbId);
 
@@ -132,7 +126,7 @@ export async function addGameToLibrary(
 
   try {
     const entry = await prisma.userGame.create({
-      data: { userId, gameId: game.id, familyShared },
+      data: { userId, gameId: game.id },
       include: withGame,
     });
 

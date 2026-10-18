@@ -170,18 +170,6 @@ function sortNote(entry: LibraryEntry, key: SortKey): string | null {
   return null;
 }
 
-// A small badge for a game added as shared through Steam Family.
-function FamilyBadge({ className = "" }: { className?: string }) {
-  return (
-    <span
-      className={`inline-block bg-mint px-1.5 pt-0.5 font-pixel text-sm leading-none tracking-wider text-forest uppercase ring-2 ring-forest ${className}`}
-    >
-      Family
-      <span className="sr-only"> (shared through Steam Family)</span>
-    </span>
-  );
-}
-
 // The box in a tile's corner while picking games. It mirrors the real checkbox beside it.
 function SelectMark({ selected, className = "" }: { selected: boolean; className?: string }) {
   return (
@@ -418,7 +406,6 @@ export function LibraryView() {
   const [reloadKey, setReloadKey] = useState(0);
   const [genres, setGenres] = useState<ReadonlySet<string>>(new Set());
   const [modes, setModes] = useState<ReadonlySet<string>>(new Set());
-  const [familyOnly, setFamilyOnly] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("added");
@@ -478,22 +465,20 @@ export function LibraryView() {
     [entries],
   );
 
-  const familyCount = entries.filter((entry) => entry.familyShared).length;
   const term = query.trim().toLowerCase();
   const visible = entries.filter(
     (entry) =>
       // Picks within one group match any of them. Picks across groups must all match.
       (genres.size === 0 || entry.game.genres.some((name) => genres.has(shortGenre(name)))) &&
       (modes.size === 0 || entry.game.gameModes.some((name) => modes.has(name))) &&
-      (!familyOnly || entry.familyShared) &&
       (!term || entry.game.title.toLowerCase().includes(term)),
   );
   const sorted = sortEntries(visible, sort, descending);
   const count = entries.length;
-  const filtered = genres.size > 0 || modes.size > 0 || familyOnly || term !== "";
+  const filtered = genres.size > 0 || modes.size > 0 || term !== "";
   // What the Filters button counts. The title search sits in the page, so it is not included.
-  const activeFilters = genres.size + modes.size + Number(familyOnly);
-  const canFilter = filters.length > 1 || modeFilters.length > 1 || familyCount > 0;
+  const activeFilters = genres.size + modes.size;
+  const canFilter = filters.length > 1 || modeFilters.length > 1;
 
   // Games gone from the library drop out of the selection without any bookkeeping.
   const picked = entries.filter((entry) => selected.has(entry.id));
@@ -505,7 +490,6 @@ export function LibraryView() {
   function clearChoices() {
     setGenres(new Set());
     setModes(new Set());
-    setFamilyOnly(false);
   }
 
   function clearFilters() {
@@ -856,10 +840,10 @@ export function LibraryView() {
             <Notice tone="info">
               No games in your library match
               {term && <> &quot;{query.trim()}&quot;</>}
-              {term && (genres.size > 0 || modes.size > 0 || familyOnly) && " in"}
+              {term && (genres.size > 0 || modes.size > 0) && " in"}
               {genres.size > 0 && ` ${[...genres].join(" or ")}`}
               {modes.size > 0 && ` ${genres.size > 0 ? "with " : ""}${[...modes].join(" or ")}`}
-              {familyOnly && " shared through Steam Family"}.
+              .
             </Notice>
             <button type="button" onClick={clearFilters} className="btn btn-secondary mx-1">
               Show all games
@@ -886,7 +870,6 @@ export function LibraryView() {
                       <span className="truncate text-lg font-bold leading-snug text-forest">
                         {entry.game.title}
                       </span>
-                      {entry.familyShared && <FamilyBadge className="shrink-0" />}
                     </span>
                     <span className="block truncate text-sm text-muted">
                       {genreLine(entry.game.genres, 3)}
@@ -930,9 +913,6 @@ export function LibraryView() {
                     <GameCover title={entry.game.title} coverUrl={entry.game.coverUrl} />
                     {selecting && (
                       <SelectMark selected={selected.has(entry.id)} className="absolute top-2 left-2" />
-                    )}
-                    {entry.familyShared && (
-                      <FamilyBadge className="absolute top-2 right-2" />
                     )}
                     {layout === "grid" && !selecting && (
                       <span
@@ -1042,26 +1022,6 @@ export function LibraryView() {
             selected={modes}
             onToggle={(name) => setModes((current) => toggled(current, name))}
           />
-
-          {familyCount > 0 && (
-            <div role="group" aria-label="Filter by source">
-              <p className="pixel-label text-muted">Source</p>
-              <div className="mt-3">
-                <button
-                  type="button"
-                  aria-pressed={familyOnly}
-                  onClick={() => setFamilyOnly((current) => !current)}
-                  className={`${filterChip} ${
-                    familyOnly
-                      ? "bg-forest text-surface"
-                      : "bg-surface text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
-                  }`}
-                >
-                  Steam Family {familyCount}
-                </button>
-              </div>
-            </div>
-          )}
 
           {activeFilters > 1 && (
             <p className="text-sm text-muted">

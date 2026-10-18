@@ -39,8 +39,8 @@ export async function detail(req: Request, res: Response) {
 }
 
 export async function add(req: Request, res: Response) {
-  const { igdbId, familyShared } = AddLibraryGameSchema.parse(req.body);
-  const entry = await addGameToLibrary(getUserId(res), igdbId, familyShared);
+  const { igdbId } = AddLibraryGameSchema.parse(req.body);
+  const entry = await addGameToLibrary(getUserId(res), igdbId);
 
   res.status(201).json({ data: entry });
 }

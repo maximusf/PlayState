@@ -39,7 +39,7 @@ model UserGame {
   // How long this player's sittings with the game usually are. Null until they say.
   sessionLength SessionLength?
 
-  // Added by hand because someone shares it through Steam Family. It still counts as owned.
+  // No longer set or shown. The column stays so removing the feature needs no migration.
   familyShared Boolean @default(false)
 
   createdAt DateTime @default(now())

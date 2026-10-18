@@ -14,8 +14,6 @@ export const AddLibraryGameSchema = z.object({
     .number({ error: "igdbId must be a number." })
     .int("igdbId must be a whole number.")
     .positive("igdbId must be positive."),
-  // Optional, so older clients that send only igdbId keep working.
-  familyShared: z.boolean({ error: "familyShared must be true or false." }).optional(),
 });
 
 export const SteamProfileSchema = z.object({
