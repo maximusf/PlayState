@@ -214,6 +214,21 @@ const GRIDS = {
     "....####....",
     "............",
   ],
+  // Two chain links on a slant, for sharing the invite link.
+  link: [
+    "............",
+    ".......####.",
+    "......##..#.",
+    ".....##...#.",
+    "....####.##.",
+    "...##..###..",
+    "..###..##...",
+    ".##.####....",
+    ".#...##.....",
+    ".#..##......",
+    ".####.......",
+    "............",
+  ],
   check: [
     "............",
     "..........##",
@@ -273,6 +288,62 @@ export function platformBadges(platforms: string[]): Badge[] {
 // A mode without an icon keeps its name, and is shown as text.
 export function gameModeBadges(gameModes: string[]): Badge[] {
   return gameModes.map((mode) => GAME_MODE_ICONS[mode] ?? { label: mode, icon: null });
+}
+
+// A paint palette in colour, drawn on a 16 by 16 grid. It is the Customize button.
+const PALETTE_COLOURS: Record<string, string> = {
+  O: "#0f2d23",
+  B: "#b9775f",
+  U: "#3b9be0",
+  Y: "#f9c933",
+  R: "#ee6f62",
+  G: "#37a35a",
+  N: "#f4812c",
+  W: "#fafbf8",
+};
+
+const PALETTE = [
+  "................",
+  ".....OOOOOOO....",
+  "...OOBBBBBBBOO..",
+  "..OBBBBBBBBBBBO.",
+  ".OBBUUBBBYYBBBBO",
+  ".OBBUUBBBYYBBRRO",
+  "OBBBBBBBBBBBBRRO",
+  "OBGGBBBBBBBBBBBO",
+  "OBGGBBBBBBBBBBO.",
+  "OBBBBBBBBBBBBO..",
+  ".OBNNBBBBBBBBO..",
+  ".OBNNBBWWBBBO...",
+  "..OBBBBWWBBO....",
+  "...OOBBBBOO.....",
+  ".....OOOOO......",
+  "................",
+];
+
+const PALETTE_RECTS = PALETTE.flatMap((row, y) =>
+  [...row.matchAll(/([A-Z])\1*/g)].map((run) => ({
+    x: run.index,
+    y,
+    width: run[0].length,
+    fill: PALETTE_COLOURS[run[1]],
+  })),
+);
+
+export function PaletteIcon({ className = "size-7" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className={className}
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {PALETTE_RECTS.map((rect) => (
+        <rect key={`${rect.x}-${rect.y}`} x={rect.x} y={rect.y} width={rect.width} height="1" fill={rect.fill} />
+      ))}
+    </svg>
+  );
 }
 
 export function PixelIcon({

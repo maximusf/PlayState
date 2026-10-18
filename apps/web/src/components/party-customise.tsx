@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { errorMessage, useApi, type PartyDetail } from "@/lib/api";
 import { PartyAvatar } from "@/components/party-avatar";
+import { PaletteIcon } from "@/components/pixel-icons";
 import { Notice } from "@/components/ui";
 import { AVATAR_HATS, PARTY_BACKDROPS, isPartyBackdropId } from "@/lib/party-cosmetics";
 import { ROLL_STYLES } from "@/lib/party-roll-styles";
@@ -150,9 +151,11 @@ export function PartyCustomise({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((current) => !current)}
-        className="btn btn-secondary"
+        aria-label="Customize"
+        title="Customize"
+        className="flex size-11 cursor-pointer items-center justify-center hover:bg-mint"
       >
-        Customize
+        <PaletteIcon />
       </button>
 
       {open && (

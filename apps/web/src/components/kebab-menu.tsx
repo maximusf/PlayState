@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { PixelIcon } from "@/components/pixel-icons";
 
 export type KebabItem = {
   label: string;
   onSelect: () => void;
   // Red text, for actions that cannot be undone.
   danger?: boolean;
+  // Makes the item a tick box. True shows it ticked and false shows it empty.
+  checked?: boolean;
 };
 
 // A triple-dot button that opens a short list of actions. Arrow keys move through the list,
@@ -114,7 +117,7 @@ export function KebabMenu({
           role="menu"
           aria-label={label}
           onKeyDown={onMenuKeyDown}
-          className="absolute right-0 top-full z-20 mt-1 min-w-44 bg-surface p-1 pixel-frame"
+          className="absolute right-0 top-full z-20 mt-1 w-max min-w-44 max-w-72 bg-surface p-1 pixel-frame"
         >
           {items.map((item, index) => (
             <button
@@ -123,15 +126,26 @@ export function KebabMenu({
                 itemRefs.current[index] = node;
               }}
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+              aria-checked={item.checked}
               onClick={() => {
                 setOpen(false);
                 item.onSelect();
               }}
-              className={`flex min-h-11 w-full cursor-pointer items-center px-3 text-left font-semibold hover:bg-mint focus-visible:bg-mint ${
+              className={`flex min-h-11 w-full cursor-pointer items-center gap-3 px-3 py-2 text-left font-semibold hover:bg-mint focus-visible:bg-mint ${
                 item.danger ? "text-danger" : "text-forest"
               }`}
             >
+              {item.checked !== undefined && (
+                <span
+                  aria-hidden="true"
+                  className={`flex size-5 shrink-0 items-center justify-center ring-2 ring-forest ring-inset ${
+                    item.checked ? "bg-forest text-surface" : "bg-surface"
+                  }`}
+                >
+                  {item.checked && <PixelIcon name="check" className="size-4" />}
+                </span>
+              )}
               {item.label}
             </button>
           ))}

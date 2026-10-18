@@ -45,6 +45,9 @@ const backLink =
   "inline-flex min-h-11 items-center font-semibold text-forest underline underline-offset-4 hover:no-underline";
 // Confirming a leave or an end is a button like the rest, marked out by red text.
 const dangerLink = "btn btn-secondary text-danger";
+// A square button that holds only an icon, like the triple dot beside it.
+const iconButton =
+  "flex size-11 shrink-0 cursor-pointer items-center justify-center text-forest hover:bg-mint";
 const plainLink =
   "min-h-11 cursor-pointer font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60";
 // A small crown in the host's badge, drawn on the pixel grid.
@@ -158,7 +161,6 @@ function PartyGames({
   const [rollError, setRollError] = useState<string | null>(null);
   // One setting for the whole party, changed only by the host.
   const ignoreLimits = party.ignoreLimits;
-  const [savingLimits, setSavingLimits] = useState(false);
   const [thrown, setThrown] = useState<Throw | null>(null);
   // The dice panel opens at the throw itself, so it appears at the same moment for every member.
   const [diceShown, setDiceShown] = useState(false);
@@ -211,25 +213,11 @@ function PartyGames({
     };
   }, [thrown]);
 
-  async function setIgnoreLimits(value: boolean) {
-    setSavingLimits(true);
-    setRollError(null);
-
-    try {
-      onChanged(await api<PartySettings>(path, { method: "PATCH", body: { ignoreLimits: value } }));
-    } catch (error) {
-      setRollError(`That setting was not saved. ${errorMessage(error)}`);
-    } finally {
-      setSavingLimits(false);
-    }
-  }
-
   // A game whose player limit is unknown counts as playable. Only a known, too-low limit rules
   // it out, and the party can choose to include those anyway, since limits are sometimes wrong
   // and a mod can raise them.
   const tooSmall = (game: { maxPlayers: number | null }) =>
     game.maxPlayers !== null && game.maxPlayers < party.memberCount;
-  const overLimit = party.shared.filter(tooSmall);
 
   const tiles: Tile[] = [
     ...party.shared
@@ -292,13 +280,6 @@ function PartyGames({
     }
   }
 
-  const limitsHelp =
-    overLimit.length === 0
-      ? `Group size is ${players(party.memberCount)}. Every shared game already fits.`
-      : ignoreLimits
-        ? `Group size is ${players(party.memberCount)}. Including ${overLimit.length} ${overLimit.length === 1 ? "game that lists" : "games that list"} fewer players.`
-        : `Group size is ${players(party.memberCount)}. Turn this on to add ${overLimit.length} ${overLimit.length === 1 ? "game that lists" : "games that list"} fewer players.`;
-
   return (
     <section className="mt-10">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -332,41 +313,6 @@ function PartyGames({
         <p className="mt-2 text-muted">
           Send the invite link to a friend to see which of these you share.
         </p>
-      )}
-
-      {/* The host's setting for the whole party. Everyone sees it, only the host can change it. */}
-      {party.shared.length > 0 && !alone && (
-        <div className="mt-4 flex items-start gap-3">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={ignoreLimits}
-            aria-labelledby="limits-label"
-            aria-describedby="limits-help"
-            disabled={!party.isHost || throwing || savingLimits}
-            onClick={() => setIgnoreLimits(!ignoreLimits)}
-            className={`relative mt-1 h-7 w-12 shrink-0 cursor-pointer ring-2 ring-forest ring-inset disabled:cursor-default ${
-              ignoreLimits ? "bg-emerald" : "bg-surface"
-            } ${party.isHost ? "" : "opacity-60"}`}
-          >
-            {/* A square knob that slides to the right when the setting is on. */}
-            <span
-              aria-hidden="true"
-              className={`absolute top-1 size-4 bg-forest transition-[left] duration-150 ${
-                ignoreLimits ? "left-7" : "left-1"
-              }`}
-            />
-          </button>
-          <div>
-            <p id="limits-label" className="font-semibold text-forest">
-              Include games that don&apos;t fit our group size
-            </p>
-            <p id="limits-help" className="text-muted">
-              {limitsHelp}
-              {!party.isHost && " Only the host can change this."}
-            </p>
-          </div>
-        </div>
       )}
 
       {(rollError ?? nominations.error) && (
@@ -646,6 +592,24 @@ export function PartyView({ code }: { code: string }) {
     setShowLink((current) => !current);
   }
 
+  // The host's setting for the whole party: games too small for the group still count as playable.
+  async function toggleIgnoreLimits() {
+    if (state.status !== "ready") return;
+    setActionError(null);
+
+    try {
+      const changes = await api<PartySettings>(path, {
+        method: "PATCH",
+        body: { ignoreLimits: !state.party.ignoreLimits },
+      });
+      setState((current) =>
+        current.status === "ready" ? { status: "ready", party: { ...current.party, ...changes } } : current,
+      );
+    } catch (error) {
+      setActionError(`That setting was not saved. ${errorMessage(error)}`);
+    }
+  }
+
   async function rename(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state.status !== "ready" || newName === null) return;
@@ -859,16 +823,18 @@ export function PartyView({ code }: { code: string }) {
                   </form>
                 )}
               </div>
-              {/* One row of actions: share the party, then the menu with the ways out of it. */}
-              <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-4 px-1 pb-3">
+              {/* One row of icons: the invite link, the look of the party, then the menu. */}
+              <div className="flex flex-wrap items-center justify-end gap-x-1 gap-y-2 px-1 pb-3">
                 <button
                   type="button"
                   onClick={toggleLink}
                   aria-expanded={showLink}
                   aria-controls="invite-link"
-                  className="btn btn-primary"
+                  aria-label={showLink ? "Hide invite link" : "Show invite link"}
+                  title={showLink ? "Hide invite link" : "Show invite link"}
+                  className={`${iconButton} ${showLink ? "bg-mint" : ""}`}
                 >
-                  {showLink ? "Hide invite link" : "Show invite link"}
+                  <PixelIcon name="link" className="size-6" />
                 </button>
 
                 <PartyCustomise
@@ -887,6 +853,16 @@ export function PartyView({ code }: { code: string }) {
                     label="Party actions"
                     disabled={leaving}
                     items={[
+                      // Only the host sees this, and only once someone else has joined.
+                      ...(state.party.isHost && state.party.memberCount > 1 && state.party.shared.length > 0
+                        ? [
+                            {
+                              label: "Include games that don't fit our group size",
+                              checked: state.party.ignoreLimits,
+                              onSelect: toggleIgnoreLimits,
+                            },
+                          ]
+                        : []),
                       state.party.isHost
                         ? { label: "End party", danger: true, onSelect: () => setConfirming("end") }
                         : { label: "Leave party", danger: true, onSelect: () => setConfirming("leave") },
@@ -920,23 +896,26 @@ export function PartyView({ code }: { code: string }) {
               </div>
             </div>
 
-            {/* The link is read-only. Showing it copies it, and clicking the field copies it again. */}
+            {/* The link is read-only. Showing it copies it, and clicking the field copies it again.
+                It sits under the icons, in a card on the right. */}
             {showLink && (
-              <div id="invite-link" className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
-                <label htmlFor="invite-link-field" className="sr-only">
-                  Invite link. Showing it copies it, and clicking it copies it again.
-                </label>
-                <input
-                  id="invite-link-field"
-                  type="text"
-                  readOnly
-                  value={typeof window === "undefined" ? "" : window.location.href}
-                  onClick={(event) => {
-                    event.currentTarget.select();
-                    void copyLink();
-                  }}
-                  className="min-h-11 w-full min-w-0 max-w-xl bg-surface px-3 text-forest ring-2 ring-fern ring-inset"
-                />
+              <div id="invite-link" className="mt-3 flex justify-end px-1">
+                <div className="w-full max-w-sm bg-surface p-2 pixel-frame">
+                  <label htmlFor="invite-link-field" className="sr-only">
+                    Invite link. Showing it copies it, and clicking it copies it again.
+                  </label>
+                  <input
+                    id="invite-link-field"
+                    type="text"
+                    readOnly
+                    value={typeof window === "undefined" ? "" : window.location.href}
+                    onClick={(event) => {
+                      event.currentTarget.select();
+                      void copyLink();
+                    }}
+                    className="min-h-11 w-full min-w-0 bg-paper px-3 text-forest ring-2 ring-fern ring-inset"
+                  />
+                </div>
               </div>
             )}
 
