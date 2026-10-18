@@ -69,6 +69,8 @@ model Party {
   extended  Boolean  @default(false)
   // The picture behind the top of the party page, chosen by the host. Null means none.
   backdropId String?
+  // How the host's dice roll is shown to the party. One of the ids in src/lib/party-roll-styles.ts.
+  rollStyle String @default("classic")
 
   members     PartyMember[]
   messages    PartyMessage[]

@@ -13,7 +13,7 @@ import {
   type PartyRoll,
   type PartySettings,
 } from "@/lib/api";
-import { Dice3D, DICE_MS } from "@/components/dice-3d";
+import { Dice3D } from "@/components/dice-3d";
 import { KebabMenu } from "@/components/kebab-menu";
 import { PartyAvatar } from "@/components/party-avatar";
 import { PartyChat } from "@/components/party-chat";
@@ -25,10 +25,13 @@ import {
   useNominations,
 } from "@/components/party-nominate";
 import { PartyReactions } from "@/components/party-reactions";
+import { RollStage } from "@/components/roll-stage";
 import { PixelIcon } from "@/components/pixel-icons";
 import { WinnerTrace } from "@/components/winner-trace";
 import { PartySkeleton } from "@/components/skeletons";
 import { CountedInput, EmptyState, GameCover, Notice } from "@/components/ui";
+import { hashString } from "@/lib/seeded";
+import { isRollStyleId, rollStyleMs, type RollStyleId } from "@/lib/party-roll-styles";
 import { expires, players } from "../parties-view";
 
 type State =
@@ -132,7 +135,9 @@ type Tile = {
 
 // A roll being played out: the game it lands on, and how long until the throw. The wait is
 // negative for a member who heard about the roll late, so they join it part way through.
-type Throw = { igdbId: number; delayMs: number };
+// `style` and `seed` are fixed when the roll is first seen, so a change of style part way through
+// cannot change a roll that is already playing. The seed is the same in every browser.
+type Throw = { igdbId: number; delayMs: number; style: RollStyleId; seed: number };
 
 function PartyGames({
   party,
@@ -171,12 +176,19 @@ function PartyGames({
 
     // No tumbling for players who have asked their device for less motion, or who heard about
     // the roll too late to catch any of it. They just see the result.
+    const style: RollStyleId = isRollStyleId(party.rollStyle) ? party.rollStyle : "classic";
+
     if (
       party.rolledIgdbId !== null &&
-      delayMs + DICE_MS > 0 &&
+      delayMs + rollStyleMs(style) > 0 &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      setThrown({ igdbId: party.rolledIgdbId, delayMs: Math.min(delayMs, ROLL_LEAD_MS) });
+      setThrown({
+        igdbId: party.rolledIgdbId,
+        delayMs: Math.min(delayMs, ROLL_LEAD_MS),
+        style,
+        seed: hashString(`${party.code}|${party.rolledAt}`),
+      });
     }
   }
 
@@ -190,7 +202,7 @@ function PartyGames({
         setThrown(null);
         setDiceShown(false);
       },
-      thrown.delayMs + DICE_MS + 300,
+      thrown.delayMs + rollStyleMs(thrown.style) + 300,
     );
 
     return () => {
@@ -371,7 +383,17 @@ function PartyGames({
       {/* Every member sees the same dice at the same moment, then the same winner. */}
       {thrown && diceShown && (
         <div className="mx-1 mt-6 flex flex-col items-center gap-6 bg-surface px-4 pb-8 pt-12 pixel-frame [--frame:var(--color-fern)]">
-          <Dice3D face={(thrown.igdbId % 6) + 1} delayMs={Math.min(thrown.delayMs, 0)} />
+          {thrown.style === "classic" ? (
+            <Dice3D face={(thrown.igdbId % 6) + 1} delayMs={Math.min(thrown.delayMs, 0)} />
+          ) : (
+            <RollStage
+              style={thrown.style}
+              games={playable}
+              winnerId={thrown.igdbId}
+              seed={thrown.seed}
+              delayMs={Math.min(thrown.delayMs, 0)}
+            />
+          )}
           <p className="pixel-label text-pine">Rolling for tonight&apos;s pick</p>
         </div>
       )}

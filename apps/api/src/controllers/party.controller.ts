@@ -9,6 +9,7 @@ import {
   PartyMemberParamSchema,
   RollSchema,
   SetBackdropSchema,
+  SetRollStyleSchema,
   SetHatSchema,
   TransferHostSchema,
   UpdatePartySchema,
@@ -29,6 +30,7 @@ import {
   removeNomination,
   setMemberHat,
   setPartyBackdrop,
+  setPartyRollStyle,
   updateParty,
 } from "../services/party.service";
 
@@ -108,6 +110,13 @@ export async function setBackdrop(req: Request, res: Response) {
   const { backdropId } = SetBackdropSchema.parse(req.body);
 
   res.status(200).json({ data: await setPartyBackdrop(getUserId(res), code, backdropId) });
+}
+
+export async function setRollStyle(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { rollStyle } = SetRollStyleSchema.parse(req.body);
+
+  res.status(200).json({ data: await setPartyRollStyle(getUserId(res), code, rollStyle) });
 }
 
 export async function remove(req: Request, res: Response) {

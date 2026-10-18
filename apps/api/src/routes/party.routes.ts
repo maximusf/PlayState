@@ -13,6 +13,7 @@ import {
   roll,
   unnominate,
   setBackdrop,
+  setRollStyle,
   setHat,
   update,
   version,
@@ -58,6 +59,7 @@ router.get("/:code/version", version);
 router.post("/:code/host", handOver);
 router.patch("/:code/me", setHat);
 router.patch("/:code/backdrop", setBackdrop);
+router.patch("/:code/roll-style", setRollStyle);
 router.post("/:code/roll", rollLimit, roll);
 router.post("/:code/nominations", nominateLimit, nominate);
 router.delete("/:code/nominations/:igdbId", nominateLimit, unnominate);

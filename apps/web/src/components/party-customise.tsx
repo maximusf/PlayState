@@ -5,6 +5,7 @@ import { errorMessage, useApi, type PartyDetail } from "@/lib/api";
 import { PartyAvatar } from "@/components/party-avatar";
 import { Notice } from "@/components/ui";
 import { AVATAR_HATS, PARTY_BACKDROPS, isPartyBackdropId } from "@/lib/party-cosmetics";
+import { ROLL_STYLES } from "@/lib/party-roll-styles";
 
 // The party's picture, shown at full strength as a banner across the top of the page. No text
 // is laid over it, so it never needs fading and the page text keeps its normal contrast. The
@@ -123,6 +124,23 @@ export function PartyCustomise({
     }
   }
 
+  async function chooseRollStyle(rollStyle: string) {
+    setBusy(true);
+    setError(null);
+
+    try {
+      const saved = await api<{ rollStyle: string; version: string }>(`${path}/roll-style`, {
+        method: "PATCH",
+        body: { rollStyle },
+      });
+      onChanged((current) => ({ ...current, rollStyle: saved.rollStyle, version: saved.version }));
+    } catch (failure) {
+      setError(`The roll animation was not changed. ${errorMessage(failure)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -230,6 +248,32 @@ export function PartyCustomise({
                       style={{ backgroundImage: `url(${backdrop.src})`, imageRendering: "pixelated" }}
                     />
                     {backdrop.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {party.isHost && (
+            <section aria-labelledby={`${panelId}-roll`}>
+              <h2 id={`${panelId}-roll`} className="pixel-label text-pine">
+                Roll animation
+              </h2>
+              <p className="mt-1 text-sm text-muted">How the dice roll looks for everyone in the party.</p>
+              <div className="mt-3 grid gap-2">
+                {ROLL_STYLES.map((style) => (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => chooseRollStyle(style.id)}
+                    disabled={busy}
+                    aria-pressed={party.rollStyle === style.id}
+                    className={`${optionBase} min-h-14 flex-col items-start justify-center px-3 py-2 text-left ${
+                      party.rollStyle === style.id ? optionOn : optionOff
+                    }`}
+                  >
+                    <span className="font-semibold">{style.label}</span>
+                    <span className="text-sm font-normal text-muted">{style.blurb}</span>
                   </button>
                 ))}
               </div>

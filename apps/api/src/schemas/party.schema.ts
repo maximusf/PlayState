@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AVATAR_HAT_IDS, PARTY_BACKDROP_IDS } from "../lib/party-cosmetics";
+import { ROLL_STYLE_IDS } from "../lib/party-roll-styles";
 
 export const MAX_PARTY_NAME = 40;
 export const MAX_DISPLAY_NAME = 24;
@@ -66,6 +67,10 @@ export const SetHatSchema = z.object({
 
 export const SetBackdropSchema = z.object({
   backdropId: z.enum(PARTY_BACKDROP_IDS, { error: "Choose a backdrop from the list." }).nullable(),
+});
+
+export const SetRollStyleSchema = z.object({
+  rollStyle: z.enum(ROLL_STYLE_IDS, { error: "Choose an animation from the list." }),
 });
 
 export const RollSchema = z.object({
