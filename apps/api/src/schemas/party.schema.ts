@@ -63,6 +63,17 @@ export const RollSchema = z.object({
     .number({ error: "igdbId must be a number." })
     .int("igdbId must be a whole number.")
     .positive("igdbId must be positive."),
+  // The host chose to roll from every playable game, not only the nominated ones.
+  fromAll: z.boolean({ error: "fromAll must be true or false." }).optional(),
+});
+
+export const NominateSchema = z.object({ igdbId: RollSchema.shape.igdbId });
+
+export const NominationParamSchema = z.object({
+  igdbId: z.coerce
+    .number({ error: "igdbId must be a number." })
+    .int("igdbId must be a whole number.")
+    .positive("igdbId must be positive."),
 });
 
 export const TransferHostSchema = z.object({

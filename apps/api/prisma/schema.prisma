@@ -67,8 +67,9 @@ model Party {
   expiresAt DateTime
   extended  Boolean  @default(false)
 
-  members  PartyMember[]
-  messages PartyMessage[]
+  members     PartyMember[]
+  messages    PartyMessage[]
+  nominations PartyNomination[]
 
   createdAt DateTime @default(now())
 
@@ -107,6 +108,22 @@ model PartyMessage {
   createdAt DateTime @default(now())
 
   @@index([partyId, createdAt])
+}
+
+// A game a member put forward for the next roll. Cleared when the host rolls.
+model PartyNomination {
+  id      String @id @default(cuid())
+  partyId String
+  // Clerk user ID of the member who nominated the game.
+  userId  String
+  igdbId  Int
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([partyId, userId, igdbId])
+  @@index([partyId])
 }
 
 enum SessionLength {

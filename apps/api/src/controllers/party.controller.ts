@@ -3,6 +3,8 @@ import { getUserId } from "../middleware/auth.middleware";
 import {
   CreatePartySchema,
   JoinPartySchema,
+  NominateSchema,
+  NominationParamSchema,
   PartyCodeParamSchema,
   PartyMemberParamSchema,
   RollSchema,
@@ -20,8 +22,10 @@ import {
   joinParty,
   leaveParty,
   listParties,
+  nominateGame,
   recordRoll,
   removeMember,
+  removeNomination,
   updateParty,
 } from "../services/party.service";
 
@@ -63,9 +67,23 @@ export async function version(req: Request, res: Response) {
 
 export async function roll(req: Request, res: Response) {
   const { code } = PartyCodeParamSchema.parse(req.params);
-  const { igdbId } = RollSchema.parse(req.body);
+  const { igdbId, fromAll } = RollSchema.parse(req.body);
 
-  res.status(200).json({ data: await recordRoll(getUserId(res), code, igdbId) });
+  res.status(200).json({ data: await recordRoll(getUserId(res), code, igdbId, fromAll) });
+}
+
+export async function nominate(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { igdbId } = NominateSchema.parse(req.body);
+
+  res.status(200).json({ data: await nominateGame(getUserId(res), code, igdbId) });
+}
+
+export async function unnominate(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { igdbId } = NominationParamSchema.parse(req.params);
+
+  res.status(200).json({ data: await removeNomination(getUserId(res), code, igdbId) });
 }
 
 export async function update(req: Request, res: Response) {

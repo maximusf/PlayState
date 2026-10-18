@@ -13,6 +13,8 @@ const HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_LIFETIME_HOURS = 24;
 // Extending, which can be done once, adds this long to when the party would otherwise end.
 const EXTENSION_MS = 24 * HOUR_MS;
+// How many games one member can have nominated at a time.
+const MAX_NOMINATIONS = 2;
 
 type PartyGame = {
   igdbId: number;
@@ -57,9 +59,13 @@ export type PartyDetail = PartySummary & {
   serverNow: string;
   // The host's setting: games too small for the group still count as playable.
   ignoreLimits: boolean;
+  // Games members put forward for the next roll. memberId matches an entry in members.
+  nominations: { igdbId: number; memberId: string }[];
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
+
+export type PartyNominations = { nominations: PartyDetail["nominations"]; version: string };
 
 export type PartySettings = { name: string; ignoreLimits: boolean; version: string };
 
@@ -86,6 +92,7 @@ type VersionedParty = {
   ignoreLimits: boolean;
   expiresAt: Date;
   members: { id: string; displayName: string }[];
+  nominations: { userId: string; igdbId: number }[];
 };
 
 // A short fingerprint of everything members can see change: the name, the host,
@@ -99,6 +106,7 @@ function versionOf(party: VersionedParty): string {
     party.ignoreLimits,
     party.expiresAt.getTime(),
     party.members.map((member) => [member.id, member.displayName]),
+    party.nominations.map((nomination) => [nomination.userId, nomination.igdbId]),
   ];
 
   return createHash("sha256").update(JSON.stringify(visible)).digest("base64url").slice(0, 16);
@@ -118,7 +126,10 @@ function notFound(): AppError {
 async function findParty(code: string) {
   const party = await prisma.party.findUnique({
     where: { code },
-    include: { members: { orderBy: { joinedAt: "asc" } } },
+    include: {
+      members: { orderBy: { joinedAt: "asc" } },
+      nominations: { orderBy: { createdAt: "asc" } },
+    },
   });
 
   // An expired party that has not been cleaned up yet is treated as gone.
@@ -302,6 +313,17 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
   );
   for (const game of listed) game.maxPlayers = limits.get(game.igdbId) ?? null;
 
+  // Only nominations by current members for games the party can still play together show.
+  const playableIds = new Set(
+    shared
+      .filter((game) => party.ignoreLimits || game.maxPlayers === null || game.maxPlayers >= memberIds.length)
+      .map((game) => game.igdbId),
+  );
+  const nominations = nominationsOf(
+    party,
+    party.nominations.filter((nomination) => playableIds.has(nomination.igdbId)),
+  );
+
   const byTitle = (a: PartyGame, b: PartyGame) => a.title.localeCompare(b.title);
 
   return {
@@ -324,6 +346,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     rolledAt: party.rolledAt?.toISOString() ?? null,
     serverNow: new Date().toISOString(),
     ignoreLimits: party.ignoreLimits,
+    nominations,
     version: versionOf(party),
   };
 }
@@ -337,7 +360,14 @@ export async function getPartyVersion(userId: string, code: string): Promise<{ v
 }
 
 // Records the game the host's dice landed on, so every member sees the same result.
-export async function recordRoll(userId: string, code: string, igdbId: number): Promise<PartyRoll> {
+// With two or more nominated games the roll comes from those alone, unless the host
+// chose to roll from everything.
+export async function recordRoll(
+  userId: string,
+  code: string,
+  igdbId: number,
+  fromAll = false,
+): Promise<PartyRoll> {
   const party = await findParty(code);
   requireHost(party, userId, "roll the dice");
 
@@ -359,14 +389,30 @@ export async function recordRoll(userId: string, code: string, igdbId: number): 
     );
   }
 
+  const nominatedIds = [...new Set(party.nominations.map((nomination) => nomination.igdbId))];
+
+  if (!fromAll && nominatedIds.length >= 2) {
+    const pool = await playableAmong(party, nominatedIds);
+
+    if (pool.size >= 2 && !pool.has(igdbId)) {
+      throw new AppError(
+        409,
+        "PARTY_GAME_NOT_NOMINATED",
+        "The roll comes from the nominated games. Reload the party and roll again.",
+      );
+    }
+  }
+
   const rolledAt = new Date();
   await prisma.party.update({ where: { id: party.id }, data: { rolledIgdbId: igdbId, rolledAt } });
+  // The next round starts with no nominations.
+  await prisma.partyNomination.deleteMany({ where: { partyId: party.id } });
 
   return {
     rolledIgdbId: igdbId,
     rolledAt: rolledAt.toISOString(),
     serverNow: new Date().toISOString(),
-    version: versionOf({ ...party, rolledIgdbId: igdbId, rolledAt }),
+    version: versionOf({ ...party, rolledIgdbId: igdbId, rolledAt, nominations: [] }),
   };
 }
 
@@ -393,6 +439,7 @@ export async function leaveParty(userId: string, code: string): Promise<void> {
   if (party.hostId === userId) await handOverOrEnd(party, userId);
 
   await prisma.partyMember.deleteMany({ where: { partyId: party.id, userId } });
+  await prisma.partyNomination.deleteMany({ where: { partyId: party.id, userId } });
 }
 
 function requireHost(party: { hostId: string }, userId: string, action: string): void {
@@ -446,6 +493,7 @@ export async function removeMember(userId: string, code: string, memberId: strin
     data: { removedUserIds: { push: member.userId } },
   });
   await prisma.partyMember.deleteMany({ where: { id: member.id, partyId: party.id } });
+  await prisma.partyNomination.deleteMany({ where: { partyId: party.id, userId: member.userId } });
 }
 
 // Passes the party to another current member, without the host having to leave.
@@ -513,4 +561,100 @@ export async function leaveAllParties(userId: string): Promise<void> {
   for (const party of hosted) await handOverOrEnd(party, userId);
 
   await prisma.partyMember.deleteMany({ where: { userId } });
+  await prisma.partyNomination.deleteMany({ where: { userId } });
+}
+
+// Which of these games the whole party owns, can play together, and (unless the host
+// ignores limits) has room for. Checked on the server, never taken on trust.
+async function playableAmong(
+  party: { members: { userId: string }[]; ignoreLimits: boolean },
+  igdbIds: number[],
+): Promise<Set<number>> {
+  const memberIds = party.members.map((member) => member.userId);
+  const entries = await prisma.userGame.findMany({
+    where: { userId: { in: memberIds }, game: { igdbId: { in: igdbIds } } },
+    include: { game: true },
+  });
+
+  const owners = new Map<number, Set<string>>();
+  for (const entry of entries) {
+    if (!hasAny(entry.game.gameModes, MULTIPLAYER_MODES)) continue;
+    const set = owners.get(entry.game.igdbId) ?? new Set<string>();
+    set.add(entry.userId);
+    owners.set(entry.game.igdbId, set);
+  }
+
+  const shared = [...owners].filter(([, set]) => set.size === memberIds.length).map(([id]) => id);
+  if (party.ignoreLimits || shared.length === 0) return new Set(shared);
+
+  const limits = await getMaxPlayers(shared).catch(() => new Map<number, number>());
+
+  return new Set(shared.filter((id) => (limits.get(id) ?? Infinity) >= memberIds.length));
+}
+
+// Swaps account IDs for the member IDs that are safe to send to the browser.
+function nominationsOf(
+  party: { members: { id: string; userId: string }[] },
+  nominations: { userId: string; igdbId: number }[],
+): PartyDetail["nominations"] {
+  return nominations.flatMap((nomination) => {
+    const nominator = party.members.find((member) => member.userId === nomination.userId);
+    return nominator ? [{ igdbId: nomination.igdbId, memberId: nominator.id }] : [];
+  });
+}
+
+// Puts a game forward for the next roll. Each member can have two at a time.
+export async function nominateGame(
+  userId: string,
+  code: string,
+  igdbId: number,
+): Promise<PartyNominations> {
+  const party = await findParty(code);
+  requireMember(party, userId);
+
+  let nominations: { userId: string; igdbId: number }[] = party.nominations;
+
+  // Nominating a game again changes nothing.
+  if (!nominations.some((n) => n.userId === userId && n.igdbId === igdbId)) {
+    if (nominations.filter((n) => n.userId === userId).length >= MAX_NOMINATIONS) {
+      throw new AppError(
+        409,
+        "NOMINATION_LIMIT",
+        `You can nominate ${MAX_NOMINATIONS} games at a time. Remove one to nominate another.`,
+      );
+    }
+
+    if (!(await playableAmong(party, [igdbId])).has(igdbId)) {
+      throw new AppError(
+        409,
+        "PARTY_GAME_NOT_PLAYABLE",
+        "That game is not one the whole party can play. Reload the party and try again.",
+      );
+    }
+
+    await prisma.partyNomination.upsert({
+      where: { partyId_userId_igdbId: { partyId: party.id, userId, igdbId } },
+      create: { partyId: party.id, userId, igdbId },
+      update: {},
+    });
+    nominations = [...nominations, { userId, igdbId }];
+  }
+
+  return { nominations: nominationsOf(party, nominations), version: versionOf({ ...party, nominations }) };
+}
+
+// Takes back one of the member's own nominations.
+export async function removeNomination(
+  userId: string,
+  code: string,
+  igdbId: number,
+): Promise<PartyNominations> {
+  const party = await findParty(code);
+  requireMember(party, userId);
+
+  await prisma.partyNomination.deleteMany({ where: { partyId: party.id, userId, igdbId } });
+
+  const nominations = party.nominations.filter((n) => !(n.userId === userId && n.igdbId === igdbId));
+
+  return { nominations: nominationsOf(party, nominations), version: versionOf({ ...party, nominations }) };
 }

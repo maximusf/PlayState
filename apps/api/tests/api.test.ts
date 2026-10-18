@@ -35,6 +35,7 @@ const db = vi.hoisted(() => ({
     deleteMany: vi.fn(),
   },
   partyMember: { count: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
+  partyNomination: { upsert: vi.fn(), deleteMany: vi.fn() },
 }));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
@@ -1116,6 +1117,7 @@ describe("parties", () => {
     extended: false,
     createdAt: new Date(),
     members,
+    nominations: [] as { userId: string; igdbId: number }[],
   });
   const game = (id: string, title: string, gameModes: string[]) => ({
     id,
@@ -1745,6 +1747,195 @@ describe("parties", () => {
     expect(db.party.update).toHaveBeenCalledWith({
       where: { id: "party_1" },
       data: { rolledIgdbId: 1, rolledAt: expect.any(Date) },
+    });
+  });
+
+  describe("nominations", () => {
+    const halo = game("game_1", "Halo Infinite", ["Multiplayer"]);
+    const doom = game("game_2", "Doom", ["Multiplayer"]);
+    const apex = game("game_4", "Apex", ["Multiplayer"]);
+    const hades = game("game_3", "Hades", ["Single player"]);
+    const both = (owned: ReturnType<typeof game>) => [owns("user_a", owned), owns("user_b", owned)];
+    const nominate = (user: string, igdbId: unknown) =>
+      request(app).post(`/api/parties/${CODE}/nominations`).set("x-test-user", user).send({ igdbId });
+    const roll = (igdbId: number, extra: object = {}) =>
+      request(app).post(`/api/parties/${CODE}/roll`).set("x-test-user", "user_a").send({ igdbId, ...extra });
+    const pair = () => party(member("user_a", "Max"), member("user_b", "Sam"));
+
+    it("lets a member nominate a playable game, and only members", async () => {
+      db.party.findUnique.mockResolvedValue(pair());
+      db.userGame.findMany.mockResolvedValue(both(halo));
+
+      const outsider = await nominate("user_z", 1);
+      const ok = await nominate("user_b", 1);
+
+      expect(outsider.status).toBe(403);
+      expect(outsider.body.error.code).toBe("PARTY_NOT_JOINED");
+      expect(ok.status).toBe(200);
+      expect(ok.body.data.nominations).toEqual([{ igdbId: 1, memberId: "member_sam" }]);
+      expect(db.partyNomination.upsert).toHaveBeenCalledTimes(1);
+      expect(db.partyNomination.upsert.mock.calls[0][0].create).toEqual({
+        partyId: "party_1",
+        userId: "user_b",
+        igdbId: 1,
+      });
+    });
+
+    it("blocks a player the host removed", async () => {
+      db.party.findUnique.mockResolvedValue({
+        ...pair(),
+        members: [member("user_a", "Max")],
+        removedUserIds: ["user_b"],
+      });
+
+      const res = await nominate("user_b", 1);
+
+      expect(res.status).toBe(403);
+      expect(db.partyNomination.upsert).not.toHaveBeenCalled();
+    });
+
+    it("only accepts games in the playable pool", async () => {
+      db.party.findUnique.mockResolvedValue(pair());
+      // Only Max owns it, then both own a single player game.
+      db.userGame.findMany.mockResolvedValueOnce([owns("user_a", halo)]);
+      db.userGame.findMany.mockResolvedValueOnce(both(hades));
+      const notShared = await nominate("user_a", 1);
+      const singlePlayer = await nominate("user_a", 3);
+
+      for (const res of [notShared, singlePlayer]) {
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe("PARTY_GAME_NOT_PLAYABLE");
+      }
+      expect((await nominate("user_a", "1")).status).toBe(400);
+      expect(db.partyNomination.upsert).not.toHaveBeenCalled();
+    });
+
+    it("limits each member to two nominations, but lets a repeat through", async () => {
+      db.party.findUnique.mockResolvedValue({
+        ...pair(),
+        nominations: [
+          { userId: "user_a", igdbId: 1 },
+          { userId: "user_a", igdbId: 2 },
+        ],
+      });
+      db.userGame.findMany.mockResolvedValue(both(apex));
+
+      const third = await nominate("user_a", 4);
+      const repeat = await nominate("user_a", 1);
+      const other = await nominate("user_b", 4);
+
+      expect(third.status).toBe(409);
+      expect(third.body.error.code).toBe("NOMINATION_LIMIT");
+      expect(repeat.status).toBe(200);
+      expect(other.status).toBe(200);
+      // Only Sam's new nomination was written.
+      expect(db.partyNomination.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets a member remove only their own nomination", async () => {
+      db.party.findUnique.mockResolvedValue({
+        ...pair(),
+        nominations: [
+          { userId: "user_a", igdbId: 1 },
+          { userId: "user_b", igdbId: 2 },
+        ],
+      });
+      const remove = (user: string, igdbId: number) =>
+        request(app).delete(`/api/parties/${CODE}/nominations/${igdbId}`).set("x-test-user", user);
+
+      // Game 2 is Sam's, so Max asking to remove it deletes nothing of Sam's.
+      const notTheirs = await remove("user_a", 2);
+
+      expect(db.partyNomination.deleteMany).toHaveBeenCalledWith({
+        where: { partyId: "party_1", userId: "user_a", igdbId: 2 },
+      });
+      expect(notTheirs.body.data.nominations).toHaveLength(2);
+
+      const own = await remove("user_a", 1);
+
+      expect(own.status).toBe(200);
+      expect(own.body.data.nominations).toEqual([{ igdbId: 2, memberId: "member_sam" }]);
+      expect((await remove("user_z", 1)).status).toBe(403);
+    });
+
+    it("shows nominations in the party and changes the version", async () => {
+      db.party.findUnique.mockResolvedValue(pair());
+      const before = await request(app).get(`/api/parties/${CODE}/version`).set("x-test-user", "user_b");
+      db.party.findUnique.mockResolvedValue({ ...pair(), nominations: [{ userId: "user_a", igdbId: 1 }] });
+      const after = await request(app).get(`/api/parties/${CODE}/version`).set("x-test-user", "user_b");
+
+      expect(after.body.data.version).not.toBe(before.body.data.version);
+
+      db.userGame.findMany.mockResolvedValue([...both(halo), ...both(hades)]);
+      const detail = await request(app).get(`/api/parties/${CODE}`).set("x-test-user", "user_b");
+
+      // Sam sees who nominated the game, by member ID and never by account ID.
+      expect(detail.body.data.nominations).toEqual([{ igdbId: 1, memberId: "member_max" }]);
+      expect(JSON.stringify(detail.body)).not.toContain("user_a");
+    });
+
+    it("rolls from the nominated games only, and clears them after the roll", async () => {
+      db.party.findUnique.mockResolvedValue({
+        ...pair(),
+        nominations: [
+          { userId: "user_a", igdbId: 1 },
+          { userId: "user_b", igdbId: 2 },
+        ],
+      });
+      db.userGame.findMany.mockImplementation(
+        async ({ where }: { where: { game: { igdbId: number | { in: number[] } } } }) => {
+          const wanted = where.game.igdbId;
+          return [halo, doom, apex]
+            .flatMap(both)
+            .filter((entry) =>
+              typeof wanted === "number"
+                ? entry.game.igdbId === wanted
+                : wanted.in.includes(entry.game.igdbId),
+            );
+        },
+      );
+
+      const outside = await roll(4);
+
+      expect(outside.status).toBe(409);
+      expect(outside.body.error.code).toBe("PARTY_GAME_NOT_NOMINATED");
+      expect(db.party.update).not.toHaveBeenCalled();
+
+      // The host can choose to roll from everything instead.
+      expect((await roll(4, { fromAll: true })).status).toBe(200);
+
+      db.partyNomination.deleteMany.mockClear();
+      const nominated = await roll(2);
+
+      expect(nominated.status).toBe(200);
+      expect(nominated.body.data.rolledIgdbId).toBe(2);
+      // The next round starts clean.
+      expect(db.partyNomination.deleteMany).toHaveBeenCalledWith({ where: { partyId: "party_1" } });
+    });
+
+    it("rolls from everything when fewer than two games are nominated", async () => {
+      db.party.findUnique.mockResolvedValue({ ...pair(), nominations: [{ userId: "user_a", igdbId: 1 }] });
+      db.userGame.findMany.mockResolvedValue(both(apex));
+
+      expect((await roll(4)).status).toBe(200);
+    });
+
+    it("drops a player's nominations when they leave or are removed", async () => {
+      db.party.findUnique.mockResolvedValue(pair());
+
+      const left = await request(app).delete(`/api/parties/${CODE}/members/me`).set("x-test-user", "user_b");
+
+      expect(left.status).toBe(204);
+      expect(db.partyNomination.deleteMany).toHaveBeenCalledWith({
+        where: { partyId: "party_1", userId: "user_b" },
+      });
+
+      db.partyNomination.deleteMany.mockClear();
+      await request(app).delete(`/api/parties/${CODE}/members/member_sam`).set("x-test-user", "user_a");
+
+      expect(db.partyNomination.deleteMany).toHaveBeenCalledWith({
+        where: { partyId: "party_1", userId: "user_b" },
+      });
     });
   });
 
