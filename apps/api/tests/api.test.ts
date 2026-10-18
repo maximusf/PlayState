@@ -1168,7 +1168,6 @@ describe("parties", () => {
     expect(res.body.data).toMatchObject({
       name: "Friday night",
       memberCount: 1,
-      extended: false,
     });
     // With no length chosen, a party lasts one day from when it was started.
     const lasts = new Date(res.body.data.expiresAt).getTime() - Date.now();
@@ -1354,24 +1353,13 @@ describe("parties", () => {
     expect(odd.status).toBe(400);
   });
 
-  it("lets only the host extend a party, and only once", async () => {
-    const base = party(member("user_a", "Max"), member("user_b", "Sam"));
-    db.party.findUnique.mockResolvedValue(base);
-    db.party.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+  it("has no way to extend a party", async () => {
+    db.party.findUnique.mockResolvedValue(party(member("user_a", "Max")));
 
-    const notHost = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_b");
-    const first = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_a");
-    const second = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_a");
+    const res = await request(app).post(`/api/parties/${CODE}/extend`).set("x-test-user", "user_a");
 
-    expect(notHost.status).toBe(403);
-    expect(first.status).toBe(200);
-    expect(first.body.data.extended).toBe(true);
-    expect(new Date(first.body.data.expiresAt).getTime()).toBe(
-      base.expiresAt.getTime() + 24 * 60 * 60 * 1000,
-    );
-    expect(db.party.updateMany.mock.calls[0][0].where).toEqual({ id: "party_1", extended: false });
-    expect(second.status).toBe(409);
-    expect(second.body.error.code).toBe("PARTY_ALREADY_EXTENDED");
+    expect(res.status).toBe(404);
+    expect(db.party.updateMany).not.toHaveBeenCalled();
   });
 
   it("lets the host hand the party to another member without leaving", async () => {

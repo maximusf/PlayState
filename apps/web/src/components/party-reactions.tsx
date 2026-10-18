@@ -206,7 +206,8 @@ export function PartyReactions({ code }: { code: string }) {
         ))}
       </div>
 
-      <div className="fixed inset-x-0 bottom-3 z-40 flex flex-col items-center gap-2 px-4">
+      {/* Part of the page, not an overlay. The emoji still float up over everything. */}
+      <div className="mt-6 flex flex-col items-start gap-2">
         {badge && (
           <p
             role="status"

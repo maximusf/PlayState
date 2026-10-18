@@ -16,7 +16,6 @@ import {
 import {
   createParty,
   endParty,
-  extendParty,
   transferHost,
   getInvite,
   getParty,
@@ -125,12 +124,6 @@ export async function handOver(req: Request, res: Response) {
   await transferHost(getUserId(res), code, memberId);
 
   res.status(204).end();
-}
-
-export async function extend(req: Request, res: Response) {
-  const { code } = PartyCodeParamSchema.parse(req.params);
-
-  res.status(200).json({ data: await extendParty(getUserId(res), code) });
 }
 
 export async function end(req: Request, res: Response) {

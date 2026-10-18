@@ -6,10 +6,10 @@ import { PartyAvatar } from "@/components/party-avatar";
 import { Notice } from "@/components/ui";
 import { AVATAR_HATS, PARTY_BACKDROPS, isPartyBackdropId } from "@/lib/party-cosmetics";
 
-// A picture behind the top of the party page. A pale scrim sits over it, so the dark text
-// stays readable: at 75% paper the weakest text colour (pine) still has a contrast ratio of
-// about 5 to 1 against the brightest pixel of any backdrop. The art is scaled to cover the
-// box and never tiled, because the space and beach pictures do not repeat cleanly.
+// The party's picture, shown at full strength as a banner across the top of the page. No text
+// is laid over it, so it never needs fading and the page text keeps its normal contrast. The
+// art is scaled to cover the banner and never tiled, because the space and beach pictures do
+// not repeat cleanly.
 export function PartyBackdrop({
   id,
   children,
@@ -21,13 +21,12 @@ export function PartyBackdrop({
   if (!backdrop) return <>{children}</>;
 
   return (
-    <div className="relative isolate -mx-4 mb-6 px-4 py-5 sm:-mx-6 sm:px-6">
+    <div>
       <div
         aria-hidden="true"
-        className="absolute inset-0 -z-10 bg-cover bg-center"
+        className="mb-6 h-32 bg-cover bg-center pixel-frame sm:h-44"
         style={{ backgroundImage: `url(${backdrop.src})`, imageRendering: "pixelated" }}
       />
-      <div aria-hidden="true" className="absolute inset-0 -z-10 bg-paper/75" />
       {children}
     </div>
   );
@@ -38,7 +37,7 @@ const optionBase =
 const optionOn = "bg-mint ring-4 ring-forest ring-inset";
 const optionOff = "ring-2 ring-fern ring-inset";
 
-// A "Customise" button with a panel under it. Everyone picks their own hat. The host also
+// A "Customize" button with a panel under it. Everyone picks their own hat. The host also
 // picks the party's backdrop. Each choice is saved at once and shown to the party on its
 // next check.
 export function PartyCustomise({
@@ -135,7 +134,7 @@ export function PartyCustomise({
         onClick={() => setOpen((current) => !current)}
         className="btn btn-secondary"
       >
-        Customise
+        Customize
       </button>
 
       {open && (
@@ -143,7 +142,7 @@ export function PartyCustomise({
           ref={panelRef}
           id={panelId}
           role="dialog"
-          aria-label="Customise"
+          aria-label="Customize"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();

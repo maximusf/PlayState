@@ -67,7 +67,6 @@ export type PartySummary = {
   memberCount: number;
   expiresAt: string;
   // Whether the host has already used the one extension.
-  extended: boolean;
   // Whether the viewer started this party, and so can end it.
   isHost: boolean;
 };

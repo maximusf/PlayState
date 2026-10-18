@@ -140,7 +140,10 @@ export function PartyChat({ path }: { path: string }) {
   if (unavailable) return null;
 
   return (
-    <section aria-label="Party chat" className="mt-10 bg-surface pixel-frame">
+    <section
+      aria-label="Party chat"
+      className="mt-10 w-full max-w-sm bg-surface pixel-frame lg:sticky lg:top-6 lg:max-w-none"
+    >
       <h2 className="m-0">
         <button
           type="button"

@@ -3,7 +3,6 @@ import {
   create,
   detail,
   end,
-  extend,
   handOver,
   invite,
   join,
@@ -59,7 +58,6 @@ router.get("/:code/version", version);
 router.post("/:code/host", handOver);
 router.patch("/:code/me", setHat);
 router.patch("/:code/backdrop", setBackdrop);
-router.post("/:code/extend", extend);
 router.post("/:code/roll", rollLimit, roll);
 router.post("/:code/nominations", nominateLimit, nominate);
 router.delete("/:code/nominations/:igdbId", nominateLimit, unnominate);
