@@ -77,7 +77,6 @@ const hadesEntry = {
   gameId: "game_1",
   createdAt: new Date("2026-10-08"),
   sessionLength: null as string | null,
-  familyShared: false,
   game: hadesRow,
 };
 
@@ -544,7 +543,6 @@ describe("POST /api/library", () => {
     expect(db.userGame.create.mock.calls[0][0].data).toEqual({
       userId: "user_a",
       gameId: "game_1",
-      familyShared: false,
     });
   });
 
@@ -858,40 +856,6 @@ describe("POST /api/library/import/steam", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.message).toContain("too quickly");
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
-  });
-});
-
-describe("POST /api/library with the family tag", () => {
-  it("saves the tag, and defaults to untagged", async () => {
-    mockIgdb(() => json([{ id: 113112, name: "Hades" }]));
-    db.game.upsert.mockResolvedValue(hadesRow);
-    db.userGame.create.mockResolvedValue({ ...hadesEntry, familyShared: true });
-
-    const tagged = await request(app)
-      .post("/api/library")
-      .set("x-test-user", "user_a")
-      .send({ igdbId: 113112, familyShared: true });
-
-    expect(tagged.status).toBe(201);
-    expect(tagged.body.data.familyShared).toBe(true);
-    expect(db.userGame.create.mock.calls[0][0].data).toEqual({
-      userId: "user_a",
-      gameId: "game_1",
-      familyShared: true,
-    });
-
-    await request(app).post("/api/library").set("x-test-user", "user_a").send({ igdbId: 113112 });
-
-    expect(db.userGame.create.mock.calls[1][0].data.familyShared).toBe(false);
-  });
-
-  it("rejects a tag that is not true or false", async () => {
-    const res = await request(app)
-      .post("/api/library")
-      .set("x-test-user", "user_a")
-      .send({ igdbId: 113112, familyShared: "yes" });
-
-    expect(res.status).toBe(400);
   });
 });
 
