@@ -18,7 +18,6 @@ export const REACTION_EMOJIS = [
   { id: "shocked", label: "Shocked", src: "/party/emoji/shocked.png" },
   { id: "party-popper", label: "Party popper", src: "/party/emoji/party-popper.png" },
   { id: "skull", label: "Skull", src: "/party/emoji/skull.png" },
-  { id: "clap", label: "Clap", src: "/party/emoji/clap.png" },
 ] as const satisfies readonly CosmeticItem<string>[];
 
 export const AVATAR_HATS = [

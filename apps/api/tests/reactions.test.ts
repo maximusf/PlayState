@@ -133,7 +133,7 @@ describe("POST /api/parties/:code/reactions", () => {
   it("prunes reactions older than a minute and anything past the cap", async () => {
     db.partyReaction.findMany.mockResolvedValue([{ id: "old_1" }, { id: "old_2" }]);
     const before = Date.now();
-    await request(app).post(URL).set("x-test-user", "user_a").send({ emoji: "clap" });
+    await request(app).post(URL).set("x-test-user", "user_a").send({ emoji: "fire" });
 
     const [ageDelete, capDelete] = db.partyReaction.deleteMany.mock.calls.map((call) => call[0]);
     const cutoff = ageDelete.where.createdAt.lt.getTime();
@@ -149,7 +149,7 @@ describe("POST /api/parties/:code/reactions", () => {
   });
 
   it("skips the cap delete when the party is under the cap", async () => {
-    await request(app).post(URL).set("x-test-user", "user_a").send({ emoji: "clap" });
+    await request(app).post(URL).set("x-test-user", "user_a").send({ emoji: "fire" });
 
     expect(db.partyReaction.deleteMany).toHaveBeenCalledTimes(1);
   });
