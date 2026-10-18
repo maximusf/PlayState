@@ -12,7 +12,6 @@ export const REACTION_EMOJI_IDS = [
   "shocked",
   "party-popper",
   "skull",
-  "clap",
 ] as const;
 
 export const SendReactionSchema = z.object({

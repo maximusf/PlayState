@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   errorMessage,
@@ -478,6 +478,7 @@ export function PartyView({ code }: { code: string }) {
   const [joining, setJoining] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [showLink, setShowLink] = useState(false);
   const [leaving, setLeaving] = useState(false);
   // Leaving or ending a party is confirmed first, since neither can be undone.
@@ -490,6 +491,8 @@ export function PartyView({ code }: { code: string }) {
   const [busy, setBusy] = useState(false);
 
   const path = `/api/parties/${encodeURIComponent(code)}`;
+
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -585,17 +588,22 @@ export function PartyView({ code }: { code: string }) {
     }
   }
 
-  // Clicking the invite field copies it. The field stays selected, so it can also be copied by hand.
-  async function copyLink(field: HTMLInputElement) {
-    field.select();
-
+  // Copies the invite link and flashes a short note at the bottom of the screen.
+  async function copyLink() {
     try {
       await navigator.clipboard.writeText(window.location.href);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 2500);
     } catch {
       setActionError("The link could not be copied. Copy it from the field instead.");
     }
+  }
+
+  // Showing the link also copies it, so one click is enough to share it.
+  function toggleLink() {
+    if (!showLink) void copyLink();
+    setShowLink((current) => !current);
   }
 
   async function rename(event: React.SubmitEvent<HTMLFormElement>) {
@@ -815,7 +823,7 @@ export function PartyView({ code }: { code: string }) {
               <div className="flex flex-wrap items-center justify-end gap-x-5 gap-y-4 px-1 pb-3">
                 <button
                   type="button"
-                  onClick={() => setShowLink((current) => !current)}
+                  onClick={toggleLink}
                   aria-expanded={showLink}
                   aria-controls="invite-link"
                   className="btn btn-primary"
@@ -872,27 +880,23 @@ export function PartyView({ code }: { code: string }) {
               </div>
             </div>
 
-            {/* The link is read-only. Clicking it copies it, so there is no separate copy button. */}
+            {/* The link is read-only. Showing it copies it, and clicking the field copies it again. */}
             {showLink && (
               <div id="invite-link" className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
                 <label htmlFor="invite-link-field" className="sr-only">
-                  Invite link. Click to copy.
+                  Invite link. Showing it copies it, and clicking it copies it again.
                 </label>
                 <input
                   id="invite-link-field"
                   type="text"
                   readOnly
                   value={typeof window === "undefined" ? "" : window.location.href}
-                  onClick={(event) => copyLink(event.currentTarget)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") copyLink(event.currentTarget);
+                  onClick={(event) => {
+                    event.currentTarget.select();
+                    void copyLink();
                   }}
-                  title="Click to copy"
-                  className="min-h-11 w-full min-w-0 max-w-xl cursor-copy bg-surface px-3 text-forest ring-2 ring-fern ring-inset"
+                  className="min-h-11 w-full min-w-0 max-w-xl bg-surface px-3 text-forest ring-2 ring-fern ring-inset"
                 />
-                <p role="status" className="min-w-16 font-semibold text-pine">
-                  {copied ? "Copied" : ""}
-                </p>
               </div>
             )}
 
@@ -992,6 +996,15 @@ export function PartyView({ code }: { code: string }) {
             <PartyChat path={path} />
             </div>
           </div>
+        )}
+      </div>
+
+      {/* A short note that the invite link reached the clipboard. It never takes clicks. */}
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+        {copied && (
+          <p className="bg-forest px-4 py-2 font-semibold text-surface pixel-frame">
+            Invite link copied to your clipboard
+          </p>
         )}
       </div>
     </div>
