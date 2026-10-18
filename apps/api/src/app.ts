@@ -7,6 +7,7 @@ import libraryRoutes from "./routes/library.routes";
 import partyChatRoutes from "./routes/party-chat.routes";
 import partyPreviewRoutes from "./routes/party-preview.routes";
 import partyRoutes from "./routes/party.routes";
+import reactionRoutes from "./routes/reaction.routes";
 import recommendationRoutes from "./routes/recommendation.routes";
 import statsRoutes from "./routes/stats.routes";
 import webhookRoutes from "./routes/webhook.routes";
@@ -44,6 +45,7 @@ app.use("/api/library", libraryRoutes);
 // Public, so it is mounted on its own path and not under the signed-in party routes.
 app.use("/api/public/parties", partyPreviewRoutes);
 app.use("/api/parties/:code/messages", partyChatRoutes);
+app.use("/api/parties/:code/reactions", reactionRoutes);
 app.use("/api/parties", partyRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/stats", statsRoutes);

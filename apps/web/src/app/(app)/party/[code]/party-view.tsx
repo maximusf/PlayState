@@ -23,6 +23,7 @@ import {
   RollSourceNote,
   useNominations,
 } from "@/components/party-nominate";
+import { PartyReactions } from "@/components/party-reactions";
 import { PixelIcon } from "@/components/pixel-icons";
 import { PartyChat } from "@/components/party-chat";
 import { WinnerTrace } from "@/components/winner-trace";
@@ -774,6 +775,7 @@ export function PartyView({ code }: { code: string }) {
 
         {state.status === "ready" && (
           <div>
+            <PartyReactions code={code} />
             <div className="flex flex-wrap items-end justify-between gap-6">
               <div>
                 <p className="pixel-label text-pine">Party</p>
