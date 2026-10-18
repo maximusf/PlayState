@@ -20,8 +20,7 @@ import { PartyChat } from "@/components/party-chat";
 import { PartyBackdrop, PartyCustomise } from "@/components/party-customise";
 import {
   NominatedBadge,
-  NominateButton,
-  NominationStrip,
+  NominateStar,
   RollSourceNote,
   useNominations,
 } from "@/components/party-nominate";
@@ -45,6 +44,25 @@ const backLink =
 const dangerLink = "btn btn-secondary text-danger";
 const plainLink =
   "min-h-11 cursor-pointer font-semibold text-forest underline underline-offset-4 hover:no-underline disabled:opacity-60";
+// A small crown in the host's badge, drawn on the pixel grid.
+const CROWN = ["#...#...#", "##.###.##", "#########", "#########", ".#######."];
+const CROWN_PATH = CROWN.flatMap((row, y) =>
+  [...row.matchAll(/#+/g)].map((run) => `M${run.index} ${y}h${run[0].length}v1H${run.index}z`),
+).join("");
+
+// Says who runs the party, on that player's own card, so it is clear to everyone and survives a
+// change of host.
+function HostBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 bg-mint px-1.5 pt-0.5 font-pixel text-sm leading-none tracking-wider text-forest uppercase ring-2 ring-forest">
+      <svg viewBox="0 0 9 5" className="h-2.5 w-4 fill-current" shapeRendering="crispEdges" aria-hidden="true" focusable="false">
+        <path d={CROWN_PATH} />
+      </svg>
+      Host
+    </span>
+  );
+}
+
 const chipButton =
   "min-h-11 cursor-pointer underline underline-offset-4 hover:no-underline disabled:opacity-60";
 
@@ -137,6 +155,8 @@ function PartyGames({
   const ignoreLimits = party.ignoreLimits;
   const [savingLimits, setSavingLimits] = useState(false);
   const [thrown, setThrown] = useState<Throw | null>(null);
+  // The dice panel opens at the throw itself, so it appears at the same moment for every member.
+  const [diceShown, setDiceShown] = useState(false);
   // The roll this page has already dealt with. A roll that is already there when the page
   // opens counts as seen, so only a roll made while watching plays the dice.
   const [seenRoll, setSeenRoll] = useState(party.rolledAt);
@@ -160,17 +180,24 @@ function PartyGames({
     }
   }
 
-  // The dice clears itself a moment after it lands.
+  // The dice panel opens when the throw begins, or at once for a member who joins part way
+  // through, and clears itself a moment after it lands. It cannot be skipped.
   useEffect(() => {
     if (!thrown) return;
-    const timer = setTimeout(() => setThrown(null), thrown.delayMs + DICE_MS + 300);
+    const show = setTimeout(() => setDiceShown(true), Math.max(thrown.delayMs, 0));
+    const clear = setTimeout(
+      () => {
+        setThrown(null);
+        setDiceShown(false);
+      },
+      thrown.delayMs + DICE_MS + 300,
+    );
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(clear);
+    };
   }, [thrown]);
-
-  function skipDice() {
-    setThrown(null);
-  }
 
   async function setIgnoreLimits(value: boolean) {
     setSavingLimits(true);
@@ -330,16 +357,6 @@ function PartyGames({
         </div>
       )}
 
-      {playable.length > 0 && !alone && (
-        <NominationStrip
-          nominations={nominations}
-          members={party.members}
-          games={playable}
-          colours={colours}
-          isHost={party.isHost}
-        />
-      )}
-
       {(rollError ?? nominations.error) && (
         <div className="mt-4">
           <Notice tone="error">{rollError ?? nominations.error}</Notice>
@@ -352,13 +369,10 @@ function PartyGames({
       </p>
 
       {/* Every member sees the same dice at the same moment, then the same winner. */}
-      {thrown && (
+      {thrown && diceShown && (
         <div className="mx-1 mt-6 flex flex-col items-center gap-6 bg-surface px-4 pb-8 pt-12 pixel-frame [--frame:var(--color-fern)]">
-          <Dice3D face={(thrown.igdbId % 6) + 1} delayMs={thrown.delayMs} />
+          <Dice3D face={(thrown.igdbId % 6) + 1} delayMs={Math.min(thrown.delayMs, 0)} />
           <p className="pixel-label text-pine">Rolling for tonight&apos;s pick</p>
-          <button type="button" onClick={skipDice} className={plainLink}>
-            Skip to the result
-          </button>
         </div>
       )}
 
@@ -438,9 +452,19 @@ function PartyGames({
                     }`}
                   />
                   <NominatedBadge
-                    nominators={party.nominations.filter((n) => n.igdbId === tile.igdbId)}
+                    nominators={party.nominations.filter(
+                      (n) => n.igdbId === tile.igdbId && n.memberId !== nominations.youId,
+                    )}
                     colours={colours}
                   />
+                  {tile.playable && !alone && (
+                    <NominateStar
+                      igdbId={tile.igdbId}
+                      title={tile.title}
+                      nominations={nominations}
+                      disabled={throwing}
+                    />
+                  )}
                 </span>
                 <span>
                   <span
@@ -452,14 +476,6 @@ function PartyGames({
                   </span>
                   {tile.note && <span className="block text-xs text-muted">{tile.note}</span>}
                 </span>
-                {tile.playable && !alone && (
-                  <NominateButton
-                    igdbId={tile.igdbId}
-                    title={tile.title}
-                    nominations={nominations}
-                    disabled={throwing}
-                  />
-                )}
               </li>
             );
           })}
@@ -484,6 +500,8 @@ export function PartyView({ code }: { code: string }) {
   const [confirming, setConfirming] = useState<"leave" | "end" | null>(null);
   // Host controls: the new name being typed, and the member a remove or a hand-over is waiting on.
   const [newName, setNewName] = useState<string | null>(null);
+  // The player whose menu is open, from the triple dot or a right click on their card.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [memberAction, setMemberAction] = useState<{ id: string; kind: "remove" | "host" } | null>(
     null,
   );
@@ -900,6 +918,12 @@ export function PartyView({ code }: { code: string }) {
               {state.party.members.map((member) => (
                 <li
                   key={member.id}
+                  // The host can also right click a card to reach the same menu as the triple dot.
+                  onContextMenu={(event) => {
+                    if (!state.party.isHost || member.isYou) return;
+                    event.preventDefault();
+                    setMenuFor(member.id);
+                  }}
                   className={`flex min-h-11 items-center gap-3 px-3 text-[0.9375rem] font-semibold ${
                     member.isYou
                       ? "bg-forest text-surface"
@@ -940,33 +964,31 @@ export function PartyView({ code }: { code: string }) {
                       <span>
                         {member.displayName}
                         {member.isYou && " (you)"}
-                        {member.isHost && !member.isYou && " (host)"}
                       </span>
-                      {/* Only the host sees these, and never on their own name. */}
+                      {member.isHost && <HostBadge />}
+                      {/* Only the host gets this menu, and never on their own card. */}
                       {state.party.isHost && !member.isYou && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setMemberAction({ id: member.id, kind: "host" })}
-                            className={chipButton}
-                          >
-                            Make host
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMemberAction({ id: member.id, kind: "remove" })}
-                            className={`${chipButton} text-danger`}
-                          >
-                            Remove
-                          </button>
-                        </>
+                        <span className="-mr-3">
+                          <KebabMenu
+                            label={`Actions for ${member.displayName}`}
+                            open={menuFor === member.id}
+                            onOpenChange={(open) => setMenuFor(open ? member.id : null)}
+                            items={[
+                              { label: "Make host", onSelect: () => setMemberAction({ id: member.id, kind: "host" }) },
+                              {
+                                label: "Remove from party",
+                                danger: true,
+                                onSelect: () => setMemberAction({ id: member.id, kind: "remove" }),
+                              },
+                            ]}
+                          />
+                        </span>
                       )}
                     </>
                   )}
                 </li>
               ))}
             </ul>
-            <PartyReactions code={code} />
             </PartyBackdrop>
 
             {actionError && (
@@ -989,7 +1011,10 @@ export function PartyView({ code }: { code: string }) {
               }
             />
 
-            <PartyChat path={path} />
+            <div className="mt-10 w-full max-w-sm space-y-4 lg:sticky lg:top-6 lg:max-w-none">
+              <PartyReactions code={code} />
+              <PartyChat path={path} />
+            </div>
             </div>
           </div>
         )}

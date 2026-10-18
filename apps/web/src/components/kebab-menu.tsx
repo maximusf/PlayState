@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 export type KebabItem = {
   label: string;
@@ -15,13 +15,26 @@ export function KebabMenu({
   label,
   items,
   disabled = false,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   // Names the button for screen readers, such as "Actions for Friday night".
   label: string;
   items: KebabItem[];
   disabled?: boolean;
+  // Optional. Lets the page open the menu some other way, such as a right click on a card.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [innerOpen, setInnerOpen] = useState(false);
+  const open = controlledOpen ?? innerOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (controlledOpen === undefined) setInnerOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange],
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -36,7 +49,7 @@ export function KebabMenu({
 
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  }, [open, setOpen]);
 
   // Opening the menu puts focus on its first action, so the keyboard can carry on from there.
   useEffect(() => {
@@ -77,7 +90,7 @@ export function KebabMenu({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         onKeyDown={(event) => {
           if (event.key === "Escape" && open) close();
         }}
