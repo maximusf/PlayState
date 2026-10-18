@@ -45,7 +45,7 @@ export type PartyInvite = PartySummary & {
 
 export type PartyDetail = PartySummary & {
   // id names a member within this party. It is not the account ID, which stays on the server.
-  members: { id: string; displayName: string; isYou: boolean; isHost: boolean }[];
+  members: { id: string; displayName: string; hatId: string | null; isYou: boolean; isHost: boolean }[];
   // Multiplayer games every member owns. libraryEntryId is the viewer's own entry.
   shared: (PartyGame & { libraryEntryId: string | null })[];
   // Multiplayer games all but one member owns, and who is missing each.
@@ -61,6 +61,8 @@ export type PartyDetail = PartySummary & {
   ignoreLimits: boolean;
   // Games members put forward for the next roll. memberId matches an entry in members.
   nominations: { igdbId: number; memberId: string }[];
+  // The host's picture for the top of the party page. Null means none.
+  backdropId: string | null;
   // Changes whenever the party does. The page checks it to know when to reload.
   version: string;
 };
@@ -91,7 +93,8 @@ type VersionedParty = {
   rolledAt: Date | null;
   ignoreLimits: boolean;
   expiresAt: Date;
-  members: { id: string; displayName: string }[];
+  backdropId: string | null;
+  members: { id: string; displayName: string; hatId: string | null }[];
   nominations: { userId: string; igdbId: number }[];
 };
 
@@ -105,8 +108,9 @@ function versionOf(party: VersionedParty): string {
     party.rolledAt?.getTime() ?? null,
     party.ignoreLimits,
     party.expiresAt.getTime(),
-    party.members.map((member) => [member.id, member.displayName]),
+    party.members.map((member) => [member.id, member.displayName, member.hatId]),
     party.nominations.map((nomination) => [nomination.userId, nomination.igdbId]),
+    party.backdropId,
   ];
 
   return createHash("sha256").update(JSON.stringify(visible)).digest("base64url").slice(0, 16);
@@ -336,6 +340,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     members: party.members.map((member) => ({
       id: member.id,
       displayName: member.displayName,
+      hatId: member.hatId,
       isYou: member.userId === userId,
       isHost: member.userId === party.hostId,
     })),
@@ -347,6 +352,7 @@ export async function getParty(userId: string, code: string): Promise<PartyDetai
     serverNow: new Date().toISOString(),
     ignoreLimits: party.ignoreLimits,
     nominations,
+    backdropId: party.backdropId,
     version: versionOf(party),
   };
 }
@@ -466,6 +472,44 @@ export async function updateParty(
     ignoreLimits: updated.ignoreLimits,
     version: versionOf(updated),
   };
+}
+
+// Puts a hat on the player's own avatar, or takes it off with null. Nobody else's can be changed.
+export async function setMemberHat(
+  userId: string,
+  code: string,
+  hatId: string | null,
+): Promise<{ hatId: string | null; version: string }> {
+  const party = await findParty(code);
+  // A removed player is no longer a member, so they cannot change anything here.
+  requireMember(party, userId);
+
+  const me = party.members.find((member) => member.userId === userId);
+  if (!me) throw notFound();
+
+  await prisma.partyMember.updateMany({ where: { id: me.id, partyId: party.id }, data: { hatId } });
+
+  return {
+    hatId,
+    version: versionOf({
+      ...party,
+      members: party.members.map((member) => (member.id === me.id ? { ...member, hatId } : member)),
+    }),
+  };
+}
+
+// Sets the picture behind the top of the party page, or clears it with null. Host only.
+export async function setPartyBackdrop(
+  userId: string,
+  code: string,
+  backdropId: string | null,
+): Promise<{ backdropId: string | null; version: string }> {
+  const party = await findParty(code);
+  requireHost(party, userId, "change the backdrop");
+
+  await prisma.party.update({ where: { id: party.id }, data: { backdropId } });
+
+  return { backdropId, version: versionOf({ ...party, backdropId }) };
 }
 
 // Takes a player out of the party and stops them rejoining with the link.

@@ -8,6 +8,8 @@ import {
   PartyCodeParamSchema,
   PartyMemberParamSchema,
   RollSchema,
+  SetBackdropSchema,
+  SetHatSchema,
   TransferHostSchema,
   UpdatePartySchema,
 } from "../schemas/party.schema";
@@ -26,6 +28,8 @@ import {
   recordRoll,
   removeMember,
   removeNomination,
+  setMemberHat,
+  setPartyBackdrop,
   updateParty,
 } from "../services/party.service";
 
@@ -91,6 +95,20 @@ export async function update(req: Request, res: Response) {
   const changes = UpdatePartySchema.parse(req.body);
 
   res.status(200).json({ data: await updateParty(getUserId(res), code, changes) });
+}
+
+export async function setHat(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { hatId } = SetHatSchema.parse(req.body);
+
+  res.status(200).json({ data: await setMemberHat(getUserId(res), code, hatId) });
+}
+
+export async function setBackdrop(req: Request, res: Response) {
+  const { code } = PartyCodeParamSchema.parse(req.params);
+  const { backdropId } = SetBackdropSchema.parse(req.body);
+
+  res.status(200).json({ data: await setPartyBackdrop(getUserId(res), code, backdropId) });
 }
 
 export async function remove(req: Request, res: Response) {

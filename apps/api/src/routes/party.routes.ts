@@ -13,6 +13,8 @@ import {
   remove,
   roll,
   unnominate,
+  setBackdrop,
+  setHat,
   update,
   version,
 } from "../controllers/party.controller";
@@ -55,6 +57,8 @@ router.delete("/:code", end);
 router.get("/:code/invite", invite);
 router.get("/:code/version", version);
 router.post("/:code/host", handOver);
+router.patch("/:code/me", setHat);
+router.patch("/:code/backdrop", setBackdrop);
 router.post("/:code/extend", extend);
 router.post("/:code/roll", rollLimit, roll);
 router.post("/:code/nominations", nominateLimit, nominate);

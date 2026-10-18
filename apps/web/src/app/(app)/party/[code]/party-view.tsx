@@ -16,6 +16,9 @@ import {
 } from "@/lib/api";
 import { Dice3D, DICE_MS } from "@/components/dice-3d";
 import { KebabMenu } from "@/components/kebab-menu";
+import { PartyAvatar } from "@/components/party-avatar";
+import { PartyChat } from "@/components/party-chat";
+import { PartyBackdrop, PartyCustomise } from "@/components/party-customise";
 import {
   NominatedBadge,
   NominateButton,
@@ -25,7 +28,6 @@ import {
 } from "@/components/party-nominate";
 import { PartyReactions } from "@/components/party-reactions";
 import { PixelIcon } from "@/components/pixel-icons";
-import { PartyChat } from "@/components/party-chat";
 import { WinnerTrace } from "@/components/winner-trace";
 import { PartySkeleton } from "@/components/skeletons";
 import { CountedInput, EmptyState, GameCover, Notice } from "@/components/ui";
@@ -776,6 +778,8 @@ export function PartyView({ code }: { code: string }) {
         {state.status === "ready" && (
           <div>
             <PartyReactions code={code} />
+            {/* The backdrop wraps everything down to the players list. */}
+            <PartyBackdrop id={state.party.backdropId}>
             <div className="flex flex-wrap items-end justify-between gap-6">
               <div>
                 <p className="pixel-label text-pine">Party</p>
@@ -846,6 +850,17 @@ export function PartyView({ code }: { code: string }) {
                 >
                   {showLink ? "Hide invite link" : "Show invite link"}
                 </button>
+
+                <PartyCustomise
+                  party={state.party}
+                  path={path}
+                  colour={memberColours.get(state.party.members.find((m) => m.isYou)?.id ?? "")}
+                  onChanged={(update) =>
+                    setState((current) =>
+                      current.status === "ready" ? { status: "ready", party: update(current.party) } : current,
+                    )
+                  }
+                />
 
                 {confirming === null ? (
                   <KebabMenu
@@ -921,12 +936,7 @@ export function PartyView({ code }: { code: string }) {
                 >
                   {/* A little person in this member's own colour. It sits on a light tile so the
                       colour reads the same on the dark name tag and the light ones. */}
-                  <span
-                    className="inline-flex size-7 shrink-0 items-center justify-center bg-surface"
-                    style={{ color: memberColours.get(member.id) }}
-                  >
-                    <PixelIcon name="singlePlayer" className="size-6" />
-                  </span>
+                  <PartyAvatar colour={memberColours.get(member.id)} hatId={member.hatId} />
                   {memberAction?.id === member.id ? (
                     <>
                       <span role="status">
@@ -984,6 +994,7 @@ export function PartyView({ code }: { code: string }) {
                 </li>
               ))}
             </ul>
+            </PartyBackdrop>
 
             {actionError && (
               <div className="mt-6">

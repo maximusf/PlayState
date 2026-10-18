@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AVATAR_HAT_IDS, PARTY_BACKDROP_IDS } from "../lib/party-cosmetics";
 
 export const MAX_PARTY_NAME = 40;
 export const MAX_DISPLAY_NAME = 24;
@@ -57,6 +58,15 @@ export const UpdatePartySchema = z
   .refine((changes) => changes.name !== undefined || changes.ignoreLimits !== undefined, {
     message: "Send a name or ignoreLimits to change.",
   });
+
+// Null takes the hat off. The field must be sent, so an empty body is never read as "no hat".
+export const SetHatSchema = z.object({
+  hatId: z.enum(AVATAR_HAT_IDS, { error: "Choose a hat from the list." }).nullable(),
+});
+
+export const SetBackdropSchema = z.object({
+  backdropId: z.enum(PARTY_BACKDROP_IDS, { error: "Choose a backdrop from the list." }).nullable(),
+});
 
 export const RollSchema = z.object({
   igdbId: z

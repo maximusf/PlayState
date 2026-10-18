@@ -66,6 +66,8 @@ model Party {
   // When the party is removed. The host picks the length at the start and can extend it once.
   expiresAt DateTime
   extended  Boolean  @default(false)
+  // The picture behind the top of the party page, chosen by the host. Null means none.
+  backdropId String?
 
   members     PartyMember[]
   messages    PartyMessage[]
@@ -85,6 +87,8 @@ model PartyMember {
   userId  String
   // The name this player chose to go by in this party.
   displayName String
+  // The hat this player wears on their avatar. Null means no hat.
+  hatId String?
 
   party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
 
