@@ -184,6 +184,32 @@ function SelectMark({ selected, className = "" }: { selected: boolean; className
   );
 }
 
+// The button in a game's top left corner. It shows while the pointer is over the game, and starts
+// picking games with this one picked first. It is see-through, like the star that nominates a game
+// in a party, and always showing on a touchscreen, which has no hover. It sits beside the game's
+// link, not inside it, so pressing it never opens the game.
+function HoverSelect({
+  title,
+  onSelect,
+  className = "",
+}: {
+  title: string;
+  onSelect: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Select ${title}`}
+      title="Select"
+      onClick={onSelect}
+      className={`absolute z-10 flex cursor-pointer items-center justify-center bg-forest/40 text-surface/80 opacity-0 transition-opacity hover:bg-forest/70 hover:text-surface focus-visible:opacity-100 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100 [@media(hover:none)]:opacity-100 ${className}`}
+    >
+      <PixelIcon name="check" className="size-5" />
+    </button>
+  );
+}
+
 // How long a finger must rest on a game to open its menu, as a right-click would.
 const LONG_PRESS_MS = 500;
 
@@ -505,6 +531,12 @@ export function LibraryView() {
     });
   }
 
+  // Pressing a game's select button starts picking games, with that game picked first.
+  function startSelecting(id: string) {
+    setSelecting(true);
+    setSelected(new Set([id]));
+  }
+
   function endSelecting() {
     setSelecting(false);
     setSelected(new Set());
@@ -786,19 +818,6 @@ export function LibraryView() {
                 )}
               </button>
             )}
-
-            <button
-              type="button"
-              aria-pressed={selecting}
-              onClick={() => (selecting ? endSelecting() : setSelecting(true))}
-              className={`inline-flex min-h-11 cursor-pointer items-center px-4 font-semibold ${
-                selecting
-                  ? "bg-forest text-surface"
-                  : "bg-surface text-forest ring-2 ring-fern ring-inset hover:ring-emerald"
-              }`}
-            >
-              Select
-            </button>
           </div>
         </div>
       )}
@@ -854,7 +873,7 @@ export function LibraryView() {
         {visible.length > 0 && layout === "list" && (
           <ul className="space-y-4 px-1">
             {sorted.map((entry) => (
-              <li key={entry.id} className="[-webkit-touch-callout:none]" {...tileProps(entry)}>
+              <li key={entry.id} className="group/tile relative [-webkit-touch-callout:none]" {...tileProps(entry)}>
                 <TileFrame
                   {...tileState(entry)}
                   className="group flex items-center gap-4 bg-surface p-3 pixel-frame transition duration-200 ease-out [--frame:var(--color-fern)] hover:-translate-y-1 hover:[--frame:var(--color-emerald)] focus-visible:-translate-y-1 focus-visible:[--frame:var(--color-emerald)]"
@@ -879,6 +898,13 @@ export function LibraryView() {
                     {listDetails(entry)}
                   </span>
                 </TileFrame>
+                {!selecting && (
+                  <HoverSelect
+                    title={entry.game.title}
+                    onSelect={() => startSelecting(entry.id)}
+                    className="top-1/2 left-4 size-7 -translate-y-1/2"
+                  />
+                )}
               </li>
             ))}
           </ul>
@@ -896,7 +922,7 @@ export function LibraryView() {
             {showAddTile && <AddGameTile />}
 
             {sorted.map((entry) => (
-              <li key={entry.id} className="[-webkit-touch-callout:none]" {...tileProps(entry)}>
+              <li key={entry.id} className="group/tile relative [-webkit-touch-callout:none]" {...tileProps(entry)}>
                 <TileFrame
                   {...tileState(entry)}
                   className={`group flex flex-col outline-offset-8 ${
@@ -943,6 +969,13 @@ export function LibraryView() {
                     </span>
                   )}
                 </TileFrame>
+                {!selecting && (
+                  <HoverSelect
+                    title={entry.game.title}
+                    onSelect={() => startSelecting(entry.id)}
+                    className={layout === "compact" ? "top-2 left-2 size-7" : "top-2 left-2 size-8"}
+                  />
+                )}
               </li>
             ))}
 
